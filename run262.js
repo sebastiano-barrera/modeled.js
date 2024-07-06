@@ -33,12 +33,15 @@ if (args.single) {
 
   for (let path of testConfig.testCases) {
     path = path.startsWith('/') ? path : (test262Root + '/' + path);
-    const outcome = await runTest262Case(test262Root, path);
-    outcome.testcase = path;
-    if (outcome.outcome === 'success')
-      successes.push(outcome);
-    else
-      failures.push(outcome);
+    const outcomes = await runTest262Case(test262Root, path);
+
+    for (const oc of outcomes) { 
+      oc.testcase = path;
+      if (oc.outcome === 'success')
+        successes.push(oc);
+      else
+        failures.push(oc);
+    }
   }
 
   console.log(`${successes.length} successes:`)
@@ -69,30 +72,53 @@ async function runTest262Case(test262Root, path) {
   const text = await Deno.readTextFile(path);
   const metadata = YAML.parse(cutMetadata(text));
 
-  const vm = new Modeled.VM();
-  // no unsupported stuff allowed here
-  vm.runScript({ path: '<preamble:sta>',    text: preamble.sta });
-  vm.runScript({ path: '<preamble:assert>', text: preamble.assert });
-
-  let outcome;
-  try {
-    outcome = vm.runScript({ path, text });
-  } catch (err) {
-    if (metadata.negative && err.name === metadata.negative.type) {
-      outcome = {
-        outcome: 'success',
-        expectedError: metadata.negative.type,
-        error: err,
-      }
-    } else {
-      outcome = {
-        outcome: 'failure',
-        errorCategory: 'vm error',
-        error: err,
+  let runStrict = true;
+  let runSloppy = true;
+  if (metadata.flags) {
+    for (const flag of metadata.flags) {
+      if (flag === 'onlyStrict') { runSloppy = false; }
+      else if (flag === 'noStrict') { runStrict = false; }
+      else {
+        throw 'unknown flag: ' + flag;
       }
     }
   }
-  return outcome;
+
+  function runInMode(strict) {
+    const vm = new Modeled.VM();
+    // no unsupported stuff allowed here
+    vm.runScript({ path: '<preamble:sta>',    text: preamble.sta });
+    vm.runScript({ path: '<preamble:assert>', text: preamble.assert });
+
+    const effectiveText = strict ? ('"use strict";' + text) : text;
+
+    let outcome;
+    try {
+      outcome = vm.runScript({ path, text: effectiveText });
+    } catch (err) {
+      if (metadata.negative && err.name === metadata.negative.type) {
+        outcome = {
+          outcome: 'success',
+          expectedError: metadata.negative.type,
+          error: err,
+        }
+      } else {
+        outcome = {
+          outcome: 'failure',
+          errorCategory: 'vm error',
+          error: err,
+        }
+      }
+    }
+     
+    return outcome;
+  }
+
+  const outcomes = []
+  if (runStrict) { outcomes.push(runInMode(true)); } 
+  if (runSloppy) { outcomes.push(runInMode(false)); } 
+
+  return outcomes
 }
 
 

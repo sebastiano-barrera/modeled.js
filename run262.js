@@ -24,7 +24,8 @@ const preamble = {
 
 if (args.single) {
   console.log(" --- single test case " + args.single);
-  await runTest262Case(test262Root, args.single);
+  const outcome = await runTest262Case(test262Root, args.single);
+  console.log(outcome);
 
 } else {
   const successes = []

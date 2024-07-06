@@ -225,7 +225,7 @@ export class VM {
     runScript(script) {
       const {path, text} = script;
       const ast = acorn.parse(text, {
-          ecmaVersion: 2020,
+          ecmaVersion: 'latest',
           directSourceFile: new SourceWrapper(text),
           locations: true,
       });
@@ -773,7 +773,16 @@ function createGlobalObject() {
             // invoked via new
             throw new VMError('not yet implemented: new String(...)')
         }
-    }))
+    }));
+    G.getProperty('String').setProperty('fromCharCode', nativeVMFunc((vm, subject, args) => {
+        const arg = args[0];
+        if (arg.type !== 'number')
+            vm.throwTypeError("String.fromCharCode requires a numeric code point, not " + arg.type);
+
+        const ret = String.fromCharCode(arg.value)
+        assert (typeof ret === 'string');
+        return {type: 'string', value: ret};
+    }));
 
     G.setProperty('Array', nativeVMFunc((vm, subject, args) => { 
         assert(subject.type === 'object', 'Only supported invoking via new Array()');

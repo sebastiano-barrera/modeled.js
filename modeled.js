@@ -39,7 +39,7 @@ class VMObject {
 
     constructor(proto = PROTO_OBJECT) {
         this.properties = new Map()
-        this.proto = proto
+        this._proto = proto
     }
 
     getProperty(name) { return this.properties.get(name) || { type: 'undefined' } }
@@ -48,10 +48,13 @@ class VMObject {
     }
     deleteProperty(name) { return this.properties.delete(name) }
 
-    get proto() { return this.#proto }
+    getIndex(index)        { return this.getProperty(String(index)); }
+    setIndex(index, value) { return this.setProperty(String(index), value); }
+
+    get proto() { return this._proto }
     set proto(newProto) {
         assert (newProto === null || newProto instanceof VMObject, "VMObject's prototype must be VMObject or null");
-        this.#proto = newProto;
+        this._proto = newProto;
     }
 }
 
@@ -61,10 +64,12 @@ const PROTO_FUNCTION = new VMObject()
 class VMInvokable extends VMObject {
     type = 'function'
 
-    constructor() {
-        super();
-        this.proto = PROTO_FUNCTION;
-        this.setProperty('prototype', new VMObject())
+    constructor(prototype) {
+        super(PROTO_FUNCTION);
+
+        const retProto = new VMObject()
+        if (prototype) retProto.proto = prototype;
+        this.setProperty('prototype', retProto);
     }
 
     invoke() { throw new AssertionError('invoke not implemented'); }
@@ -381,7 +386,20 @@ export class VM {
 
             const returnValue = this.evalExpr(node.argument);
             throw { returnValue };
-        }
+        },
+
+        ForStatement(node) {
+            this.#withScope(() => {
+                for(node.init.type === 'VariableDeclaration' 
+                        ? this.runStmt(node.init) 
+                        : this.evalExpr(node.init);
+                    this.isTruthy(this.evalExpr(node.test));
+                    this.evalExpr(node.update)
+                ) {
+                    this.runStmt(node.body);
+                }
+            });
+        },
     }
 
     //
@@ -420,6 +438,42 @@ export class VM {
         throw new VMError('not yet implemented: isTruthy: ' + Deno.inspect(value));
     }
 
+    performNew(constructor, args) {
+        const obj = new VMObject();
+        const retVal = this.performCall(constructor, obj, args);
+        assert (typeof retVal === 'object', 'vm bug: invalid return type from call');
+        obj.setProperty('constructor', constructor);
+        obj.proto = constructor.getProperty('prototype');
+        return retVal.type === 'undefined' ? obj : retVal;
+    }
+
+    doAssignment(targetExpr, value) {
+        if (targetExpr.type === "MemberExpression") {
+            const obj = this.evalExpr(targetExpr.object);
+            assert(targetExpr.property.type === 'Identifier', 'unsupported member property: ' + targetExpr.property.type);
+            const propertyName = targetExpr.property.name;
+
+            obj.setProperty(propertyName, value);
+
+        } else if (targetExpr.type === "Identifier") {
+            const name = targetExpr.name;
+            this.setVar(name, value);
+        
+        } else {
+            throw new VMError('unsupported assignment target: ' + Deno.inspect(stmt.id));
+        }
+
+        return value;
+    }
+
+    throwTypeError(message) {
+        const excCons = this.globalObj.getProperty('TypeError');
+        const messageValue = {type: 'string', value: message};
+        const exc = this.performNew(excCons, [messageValue]);
+        console.log(exc)
+        throw new ProgramException(exc, this.synCtx);
+    }
+
     exprs = {
         AssignmentExpression(expr) {
             let value = this.evalExpr(expr.right);
@@ -434,23 +488,26 @@ export class VM {
 
             assert(!expr.left.computed, 'unsupported: MemberExpression.computed');
             assert(!expr.left.optional, 'unsupported: MemberExpression.optional');
+            return this.doAssignment(expr.left, value);
+        },
 
-            if (expr.left.type === "MemberExpression") {
-                const obj = this.evalExpr(expr.left.object);
-                assert(expr.left.property.type === 'Identifier', 'unsupported member property: ' + expr.left.property.type);
-                const propertyName = expr.left.property.name;
-
-                obj.setProperty(propertyName, value);
-
-            } else if (expr.left.type === "Identifier") {
-                const name = expr.left.name;
-                this.setVar(name, value);
-                
-            } else {
-                throw new VMError('unsupported assignment target: ' + Deno.inspect(stmt.id));
+        UpdateExpression(expr) {
+            const value = this.evalExpr(expr.argument);
+            if (value.type !== 'number') {
+                this.throwTypeError(`update operation only support on numbers, not ${value.type}`);
             }
 
-            return value;
+            let newValue;
+            if (expr.operator === '++') {
+                newValue = {type: 'number', value: value.value + 1};
+            } else if (expr.operator === '--') {
+                newValue = {type: 'number', value: value.value - 1};
+            } else {
+                throw new VMError('unsupported update operator: ' + expr.operator);
+            }
+
+            this.doAssignment(expr.argument, newValue);
+            return newValue;
         },
 
         FunctionExpression(expr) {
@@ -467,15 +524,32 @@ export class VM {
             return new VMObject()
         },
 
+        ArrayExpression(expr) {
+            const elements = expr.elements.map(elmNode => this.evalExpr(elmNode))
+
+            const arrayCons = this.globalObj.getProperty('Array');
+            const array = this.performNew(arrayCons, [])
+            const pushMethod = array.getProperty('push');
+            for (const elm of elements) {
+                this.performCall(pushMethod, array, [elm]);
+            }
+
+            return array
+        },
+
         MemberExpression(expr) {
             assert(!expr.optional, "unsupported: MemberExpression.optional");
 
             const object = this.evalExpr(expr.object);
             if (expr.computed) {
                 const key = this.evalExpr(expr.property);
-                if (key.type === 'string')
+                if (key.type === 'string') {
                     return object.getProperty(key.value);
-                throw new AssertionError('MemberExpression: unsupported key type: ' + key.tpe);
+                } else if (key.type === 'number') {
+                    return object.getIndex(key.value);
+                } else {
+                    throw new AssertionError('MemberExpression: unsupported key type: ' + key.type);
+                }
             }
 
             assert (expr.property.type === 'Identifier', 'MemberExpression: !computed, but property not an Identifier');
@@ -497,6 +571,17 @@ export class VM {
         },
 
         BinaryExpression(expr) {
+            const numericOp = (impl) => {
+                const a = this.evalExpr(expr.left);
+                const b = this.evalExpr(expr.right);
+                if (a.type !== 'number' || b.type !== 'number') {
+                    this.throwTypeError(`invalid operands for numeric op: ${a.type} and ${b.type}`);
+                }
+                const retVal = impl(a.value, b.value);
+                assert (typeof retVal === 'number' || typeof retVal === 'boolean');
+                return {type: typeof retVal, value: retVal};
+            };
+
             if      (expr.operator === '===') { return this.tripleEqual(expr.left, expr.right); }
             else if (expr.operator === '!==') {
                 const ret = this.tripleEqual(expr.left, expr.right);
@@ -520,6 +605,13 @@ export class VM {
                     return {type: 'string', value: as.value + bs.value};
                 }
             }
+            else if (expr.operator === '<')  { return numericOp((a, b) => (a < b)); }
+            else if (expr.operator === '<=') { return numericOp((a, b) => (a <= b)); }
+            else if (expr.operator === '>')  { return numericOp((a, b) => (a > b)); }
+            else if (expr.operator === '>=') { return numericOp((a, b) => (a >= b)); }
+            else if (expr.operator === '-')  { return numericOp((a, b) => (a - b)); }
+            else if (expr.operator === '*')  { return numericOp((a, b) => (a * b)); }
+            else if (expr.operator === '/')  { return numericOp((a, b) => (a / b)); }
             else { throw new VMError('unsupported binary op: ' + expr.operator); }
         },
 
@@ -540,17 +632,9 @@ export class VM {
         },
 
         NewExpression(expr) {
-            const obj = new VMObject();
-
-            const callee = this.evalExpr(expr.callee);
+            const constructor = this.evalExpr(expr.callee);
             const args = expr.arguments.map(argNode => this.evalExpr(argNode));
-            const retVal = this.performCall(callee, obj, args);
-            assert (typeof retVal === 'object', 'vm bug: invalid return type from call');
-
-            obj.setProperty('constructor', callee);
-            obj.proto = callee.getProperty('prototype');
-
-            return retVal.type === 'undefined' ? obj : retVal;
+            return performNew(constructor, args)
         },
 
         CallExpression(expr) {
@@ -650,36 +734,72 @@ export class VM {
 
 
 function createGlobalObject() {
+    function nativeVMFunc(innerImpl) {
+        return new class extends VMInvokable {
+            // in innerImpl, `this` is the VMInvokable object
+            invoke = innerImpl
+        }
+    }
+
     const G = new VMObject();
 
-    G.setProperty('String', new class extends VMInvokable {
-        invoke(vm, subject, args) { 
-            if(subject.type === 'undefined') {
-                // invoked as function, not via new
-                return vm.valueToString(args[0])
-            } else {
-                // invoked via new
-                throw new VMError('not yet implemented: new String(...)')
-            }
-        }
-    })
+    G.setProperty('Error', nativeVMFunc((vm, subject, args) => {
+        subject.setProperty('message', args[0]);
+        return subject;
+    }));
+    G.getProperty('Error').getProperty('prototype').setProperty('name', 'Error')
 
-    G.setProperty('nativeHello', new class extends VMInvokable {
-        invoke(vm, subject, args) {
-            console.log('hello world!')
-            return {type: 'undefined'}
+    function createSimpleErrorType(name) { 
+        const Error = G.getProperty('Error');
+        const parentProto = Error.getProperty('prototype');
+        const constructor = new class extends VMInvokable {
+            constructor() { super(parentProto); }
+            invoke(vm, subject, args) { return Error.invoke(vm, subject, args); }
         }
-    })
+        constructor.getProperty('prototype').setProperty('name', name);
 
-    G.setProperty('$print', new class extends VMInvokable {
-        invoke(vm, subject, args) {
-            for (const arg of args) {
-                const prim = vm.valueToPrimitive(arg)
-                console.log(prim)
-            }
-            return {type: 'undefined'}
+        G.setProperty(name, constructor);
+    }
+
+    createSimpleErrorType('TypeError')
+    createSimpleErrorType('RangeError')
+    createSimpleErrorType('NameError')
+
+    G.setProperty('String', nativeVMFunc((vm, subject, args) => { 
+        if(subject.type === 'undefined') {
+            // invoked as function, not via new
+            return vm.valueToString(args[0])
+        } else {
+            // invoked via new
+            throw new VMError('not yet implemented: new String(...)')
         }
-    })
+    }))
+
+    G.setProperty('Array', nativeVMFunc((vm, subject, args) => { 
+        assert(subject.type === 'object', 'Only supported invoking via new Array()');
+
+        subject.arrayElements = [];
+
+        subject.setProperty('push', nativeVMFunc((vm, subject, args) => {
+            if (typeof args[0] !== 'undefined')
+                subject.arrayElements.push(args[0])
+        }));
+
+        return {type: 'undefined'}
+    }));
+
+    G.setProperty('nativeHello', nativeVMFunc((vm, subject, args) => { 
+        console.log('hello world!')
+        return {type: 'undefined'}
+    }));
+
+    G.setProperty('$print', nativeVMFunc((vm, subject, args) => {
+        for (const arg of args) {
+            const prim = vm.valueToPrimitive(arg)
+            console.log(prim)
+        }
+        return {type: 'undefined'}
+    }));
 
     return G;
 }
@@ -690,4 +810,6 @@ class SourceWrapper {
     getRange(start, end) { return this.#text.slice(start, end) }
 }
 
+
+// vim:ts=4:sts=0:sw=0:et
 

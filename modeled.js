@@ -339,6 +339,8 @@ export class VM {
     }
 
     stmts = {
+        EmptyStatement(stmt) { },
+
         BlockStatement(stmt) {
             this.runBlockBody(stmt.body);
         },

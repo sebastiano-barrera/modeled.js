@@ -57,7 +57,7 @@ class VMObject {
 
         return {type: 'undefined'};
     }
-    setProperty(name, value) { 
+    setProperty(name, value) {
         return this.properties.set(name, value)
     }
     deleteProperty(name) { return this.properties.delete(name) }
@@ -132,8 +132,8 @@ class VarScope {
         else if (this.parent) this.parent.setVar(name, value);
         else {
             const exc = new VMObject();
-            exc.setProperty('name', 'NameError');
-            exc.setProperty('message', 'unbound variable: ' + name)
+            exc.setProperty('name', {type: 'string', value: 'NameError'});
+            exc.setProperty('message', {type: 'string', value:  'unbound variable: ' + name})
             throw new ProgramException(exc, [...this.synCtx]);
         }
     }
@@ -772,7 +772,9 @@ function createGlobalObject() {
         subject.setProperty('message', args[0]);
         return subject;
     }));
-    G.getOwnProperty('Error').getProperty('prototype').setProperty('name', 'Error')
+    G.getOwnProperty('Error')
+        .getProperty('prototype')
+        .setProperty('name', {type: 'string', value: 'Error'})
 
     function createSimpleErrorType(name) { 
         const Error = G.getOwnProperty('Error');
@@ -781,7 +783,7 @@ function createGlobalObject() {
             constructor() { super(parentProto); }
             invoke(vm, subject, args) { return Error.invoke(vm, subject, args); }
         }
-        constructor.getOwnProperty('prototype').setProperty('name', name);
+        constructor.getOwnProperty('prototype').setProperty('name', {type: 'string', value: name});
 
         G.setProperty(name, constructor);
     }
@@ -845,6 +847,7 @@ function createGlobalObject() {
             obj.innerRE = innerRE
             obj.proto = regexp_proto
             obj.setProperty('constructor', this)
+            obj.setProperty('source', {type: 'string', value: innerRE.source})
             return obj
         }
 

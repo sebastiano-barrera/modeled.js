@@ -455,7 +455,6 @@ export class VM {
 
     performNew(constructor, args) {
         const obj = new VMObject();
-        console.log('new with constructor = ', Deno.inspect(constructor))
         const retVal = this.performCall(constructor, obj, args);
         assert (typeof retVal === 'object', 'vm bug: invalid return type from call');
         obj.setProperty('constructor', constructor);

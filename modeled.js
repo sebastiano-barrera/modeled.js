@@ -115,6 +115,33 @@ class VMFunction extends VMInvokable {
     }
 }
 
+const PROTO_NUMBER = new VMObject();
+const PROTO_BOOLEAN = new VMObject();
+
+const PROTO_STRING = new VMObject();
+PROTO_STRING.setProperty('replace', nativeVMFunc((vm, subject, args) => {
+    if (typeof subject.primitive !== 'string')
+        vm.throwTypeError('String.prototype.replace must be called on a string primitive');
+    if (args[0].type !== 'string')
+        vm.throwTypeError('String.prototype.replace: first argument must be string');
+
+    let retStr;
+    if (args[1].type === 'string') {
+        retStr = subject.primitive.replace(args[0].value, args[1].value);
+    } else if (args[1] instanceof VMInvokable) {
+        retStr = subject.primitive.replace(args[0].value, () => {
+            const ret = vm.performCall(args[1], {type: 'undefined'}, [args[0]]);
+            if (ret.type !== 'string')
+                vm.throwTypeError('invalid return value from passed function: ' + ret.type);
+            return ret.value;
+        });
+    } else {
+        vm.throwTypeError('String.prototype.replace: invalid type for argument #2: ' + args[1].type)
+    }
+
+    return {type: 'string', value: retStr};
+}))
+
 
 class VarScope {
     constructor() {
@@ -489,6 +516,23 @@ export class VM {
         throw new ProgramException(exc, this.synCtx);
     }
 
+    coerceToObject(value) {
+        if (value instanceof VMObject && value.value !== null) return value;
+        
+        const proto = {
+            number: PROTO_NUMBER,
+            boolean: PROTO_BOOLEAN,
+            string: PROTO_STRING,
+        }[value.type];
+        if (proto) {
+            const obj = new VMObject(proto);
+            obj.primitive = value.value;
+            return obj;
+        }
+        
+        this.throwTypeError("can't convert value to object: " + Deno.inspect(value));
+    }
+
     exprs = {
         AssignmentExpression(expr) {
             let value = this.evalExpr(expr.right);
@@ -670,6 +714,7 @@ export class VM {
                 const name = expr.callee.property.name;
 
                 callThis = this.evalExpr(expr.callee.object);
+                callThis = this.coerceToObject(callThis);
                 callee = callThis.getProperty(name);
                 if (callee.type === 'undefined') {
                     throw new VMError(`can't find method ${name} in ${Deno.inspect(callThis)}`);

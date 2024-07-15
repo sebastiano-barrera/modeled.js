@@ -305,6 +305,7 @@ export class VM {
             this.runBlockBody(stmt.body);
         },
 
+        /** @this VM */
         TryStatement(stmt) {
             try {
                 this.#withScope(() => this.runStmt(stmt.block));
@@ -390,6 +391,7 @@ export class VM {
             throw { returnValue };
         },
 
+        /** @this VM */
         ForStatement(node) {
             this.#withScope(() => {
                 for(node.init.type === 'VariableDeclaration' 

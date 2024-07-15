@@ -581,8 +581,22 @@ export class VM {
         },
 
         ObjectExpression(expr) {
-            assert(expr.properties.length === 0, "unsupported: non-empty object literals");
-            return new VMObject()
+            const obj = new VMObject();
+
+            for (const propertyNode of expr.properties) {
+                assert (propertyNode.type === 'Property');                
+                assert (propertyNode.method === false);                
+                assert (propertyNode.shorthand === false);                
+                assert (propertyNode.computed === false);                
+                assert (propertyNode.kind === 'init');                
+
+                assert (propertyNode.key.type === 'Identifier');
+                const key = propertyNode.key.name;
+                const value = this.evalExpr(propertyNode.value);
+                obj.setProperty(key, value);
+            }
+
+            return obj;
         },
 
         ArrayExpression(expr) {

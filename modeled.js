@@ -42,13 +42,27 @@ class VMObject {
         this._proto = proto
     }
 
-    getProperty(name) { return this.properties.get(name) || { type: 'undefined' } }
+    getOwnProperty(name) { return this.properties.get(name) || { type: 'undefined' } }
+    getProperty(name) {
+        assert (typeof name === 'string');
+        
+        let object = this;
+        while (object !== null) {
+            let value = object.getOwnProperty(name);
+            if (value.type !== 'undefined') {
+                return value;
+            }
+            object = object.proto;
+        }
+
+        return {type: 'undefined'};
+    }
     setProperty(name, value) { 
         return this.properties.set(name, value)
     }
     deleteProperty(name) { return this.properties.delete(name) }
 
-    getIndex(index)        { return this.getProperty(String(index)); }
+    getIndex(index)        { return this.getOwnProperty(String(index)); }
     setIndex(index, value) { return this.setProperty(String(index), value); }
 
     get proto() { return this._proto }
@@ -553,21 +567,12 @@ export class VM {
                 throw new AssertionError('MemberExpression: !computed, but property not an Identifier');
             }
 
-            while (object !== null) {
-                let value;
-                if (key.type === 'string') {
-                    value = object.getProperty(key.value);
-                } else if (key.type === 'number') {
-                    value = object.getIndex(key.value);
-                } else {
-                    throw new AssertionError('MemberExpression: unsupported key type: ' + key.type);
-                }
-
-                if (value.type !== 'undefined') {
-                    return value;
-                }
-
-                object = object.proto;
+            if (key.type === 'string') {
+                return object.getProperty(key.value);
+            } else if (key.type === 'number') {
+                return object.getIndex(key.value);
+            } else {
+                throw new AssertionError('MemberExpression: unsupported key type: ' + key.type);
             }
         },
 
@@ -697,7 +702,8 @@ export class VM {
             const value = node.value;
             const type = typeof value;
 
-            if (type === 'number' || type === 'string') {
+            if (type === 'number' || type === 'string' || type === 'boolean') {
+                assert (typeof value === type);
                 return {type, value};
 
             } else if(node.value instanceof RegExp) {
@@ -721,7 +727,7 @@ export class VM {
     valueToPrimitive(value) {
         if (value instanceof VMObject) {
             for (const methodName of ['valueOf', 'toString']) {
-                const method = value.getProperty(methodName);
+                const method = value.getOwnProperty(methodName);
                 if (method.type !== 'function') continue;
 
                 const ret = this.performCall(method, value, []);
@@ -766,16 +772,16 @@ function createGlobalObject() {
         subject.setProperty('message', args[0]);
         return subject;
     }));
-    G.getProperty('Error').getProperty('prototype').setProperty('name', 'Error')
+    G.getOwnProperty('Error').getProperty('prototype').setProperty('name', 'Error')
 
     function createSimpleErrorType(name) { 
-        const Error = G.getProperty('Error');
+        const Error = G.getOwnProperty('Error');
         const parentProto = Error.getProperty('prototype');
         const constructor = new class extends VMInvokable {
             constructor() { super(parentProto); }
             invoke(vm, subject, args) { return Error.invoke(vm, subject, args); }
         }
-        constructor.getProperty('prototype').setProperty('name', name);
+        constructor.getOwnProperty('prototype').setProperty('name', name);
 
         G.setProperty(name, constructor);
     }
@@ -793,7 +799,7 @@ function createGlobalObject() {
             throw new VMError('not yet implemented: new String(...)')
         }
     }));
-    G.getProperty('String').setProperty('fromCharCode', nativeVMFunc((vm, subject, args) => {
+    G.getOwnProperty('String').setProperty('fromCharCode', nativeVMFunc((vm, subject, args) => {
         const arg = args[0];
         if (arg.type !== 'number')
             vm.throwTypeError("String.fromCharCode requires a numeric code point, not " + arg.type);

@@ -629,7 +629,11 @@ export class VM {
                 const name = expr.argument.name;
                 const didDelete = this.deleteVar(name);
                 return {type: 'boolean', value: didDelete};
-                
+
+            } else if (expr.operator === 'typeof') {
+                const value = this.evalExpr(expr.argument);
+                return {type: 'string', value: value.type};
+
             } else {
                 throw new VMError('unsupported unary op: ' + expr.operator);
             }

@@ -63,12 +63,9 @@ const PROTO_OBJECT = new VMObject(null)
 class VMInvokable extends VMObject {
     type = 'function'
 
-    constructor(prototype) {
+    constructor() {
         super(PROTO_FUNCTION);
-
-        const retProto = new VMObject()
-        if (prototype) retProto.proto = prototype;
-        this.setProperty('prototype', retProto);
+        this.setProperty('prototype', new VMObject());
     }
 
     invoke() { throw new AssertionError('invoke not implemented'); }
@@ -444,6 +441,7 @@ export class VM {
 
     performNew(constructor, args) {
         const obj = new VMObject();
+        console.log('new with constructor = ', Deno.inspect(constructor))
         const retVal = this.performCall(constructor, obj, args);
         assert (typeof retVal === 'object', 'vm bug: invalid return type from call');
         obj.setProperty('constructor', constructor);
@@ -544,20 +542,33 @@ export class VM {
         MemberExpression(expr) {
             assert(!expr.optional, "unsupported: MemberExpression.optional");
 
-            const object = this.evalExpr(expr.object);
+            let object = this.evalExpr(expr.object);
+
+            let key;
             if (expr.computed) {
-                const key = this.evalExpr(expr.property);
+                key = this.evalExpr(expr.property);
+            } else if (expr.property.type === 'Identifier') {
+                key = { type: 'string', value: expr.property.name };
+            } else {
+                throw new AssertionError('MemberExpression: !computed, but property not an Identifier');
+            }
+
+            while (object !== null) {
+                let value;
                 if (key.type === 'string') {
-                    return object.getProperty(key.value);
+                    value = object.getProperty(key.value);
                 } else if (key.type === 'number') {
-                    return object.getIndex(key.value);
+                    value = object.getIndex(key.value);
                 } else {
                     throw new AssertionError('MemberExpression: unsupported key type: ' + key.type);
                 }
-            }
 
-            assert (expr.property.type === 'Identifier', 'MemberExpression: !computed, but property not an Identifier');
-            return object.getProperty(expr.property.name);
+                if (value.type !== 'undefined') {
+                    return value;
+                }
+
+                object = object.proto;
+            }
         },
 
         UnaryExpression(expr) {
@@ -638,7 +649,7 @@ export class VM {
         NewExpression(expr) {
             const constructor = this.evalExpr(expr.callee);
             const args = expr.arguments.map(argNode => this.evalExpr(argNode));
-            return performNew(constructor, args)
+            return this.performNew(constructor, args)
         },
 
         CallExpression(expr) {

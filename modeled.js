@@ -39,16 +39,28 @@ class VMObject {
 
     constructor(proto = PROTO_OBJECT) {
         this.properties = new Map()
+        this.describedProperties = new Map()
         this._proto = proto
     }
 
-    getOwnProperty(name) { return this.properties.get(name) || { type: 'undefined' } }
-    getProperty(name) {
+    getOwnProperty(name, vm = undefined) {
+        const descriptorValue = this.describedProperties.get(name)
+        if (descriptorValue) {
+            assert (descriptorValue instanceof VMObject);
+
+            const getter = descriptorValue.getOwnProperty('get');
+            assert (vm instanceof VM, "looking up described value but vm not passed");
+            return vm.performCall(getter, this, []);
+        }
+
+        return this.properties.get(name) || { type: 'undefined' }
+    }
+    getProperty(name, vm = undefined) {
         assert (typeof name === 'string');
         
         let object = this;
         while (object !== null) {
-            let value = object.getOwnProperty(name);
+            let value = object.getOwnProperty(name, vm);
             if (value.type !== 'undefined') {
                 return value;
             }
@@ -59,6 +71,12 @@ class VMObject {
     }
     setProperty(name, value) {
         return this.properties.set(name, value)
+    }
+    setDescribedProperty(name, descriptorValue) {
+        // descriptorValue is a VM value
+        assert (typeof name === 'string');
+        assert (descriptorValue instanceof VMObject);
+        this.describedProperties.set(name, descriptorValue)
     }
     deleteProperty(name) { return this.properties.delete(name) }
 
@@ -615,7 +633,7 @@ export class VM {
         MemberExpression(expr) {
             assert(!expr.optional, "unsupported: MemberExpression.optional");
 
-            let object = this.evalExpr(expr.object);
+            let object = this.coerceToObject(this.evalExpr(expr.object));
 
             let key;
             if (expr.computed) {
@@ -627,7 +645,7 @@ export class VM {
             }
 
             if (key.type === 'string') {
-                return object.getProperty(key.value);
+                return object.getProperty(key.value, this);
             } else if (key.type === 'number') {
                 return object.getIndex(key.value);
             } else {
@@ -855,6 +873,24 @@ function createGlobalObject() {
     createSimpleErrorType('TypeError')
     createSimpleErrorType('RangeError')
     createSimpleErrorType('NameError')
+
+    const consObject = nativeVMFunc((vm, subject, args) => {
+        throw new Error('not yet implemented: Object()');
+    });
+    consObject.setProperty('prototype', PROTO_OBJECT);
+    consObject.setProperty('defineProperty', nativeVMFunc((vm, subject, args) => {
+        const [obj, name, descriptor] = args;
+        if (!(obj instanceof VMObject))
+            vm.throwTypeError("Object.defineProperty: first argument must be object");
+        if (name.type !== 'string')
+            vm.throwTypeError("Object.defineProperty: second argument must be string");
+        if (!(descriptor instanceof VMObject))
+            vm.throwTypeError("Object.defineProperty: third argument must be object");
+
+        obj.setDescribedProperty(name.value, descriptor);
+        return {type: 'undefined'};
+    }));
+    G.setProperty('Object', consObject);
 
     G.setProperty('String', nativeVMFunc((vm, subject, args) => { 
         if(subject.type === 'undefined') {

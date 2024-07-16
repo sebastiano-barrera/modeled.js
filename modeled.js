@@ -421,6 +421,10 @@ export class VM {
                 this.currentScope = topScope;
                 this.currentScope.this = this.globalObj;
 
+                if (node.body.length > 0 && node.body[0].directive === 'use strict') {
+                    this.currentScope.isSetStrict = true;
+                }
+
                 this.runBlockBody(node.body);
 
                 assert (this.currentScope === topScope, "stack manipulated!");

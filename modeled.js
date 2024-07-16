@@ -92,6 +92,10 @@ class VMObject {
 }
 
 const PROTO_OBJECT = new VMObject(null)
+const PROTO_FUNCTION = new VMObject(PROTO_OBJECT)
+const PROTO_NUMBER = new VMObject()
+const PROTO_BOOLEAN = new VMObject()
+const PROTO_STRING = new VMObject()
 
 class VMInvokable extends VMObject {
     type = 'function'
@@ -104,7 +108,6 @@ class VMInvokable extends VMObject {
     invoke() { throw new AssertionError('invoke not implemented'); }
 }
 
-const PROTO_FUNCTION = new VMObject(PROTO_OBJECT)
 PROTO_FUNCTION.setProperty('bind', nativeVMFunc((vm, outerInvokable, args) => {
     const forcedSubject = args[0];
     return nativeVMFunc((vm, _, args) => {
@@ -175,10 +178,7 @@ class VMFunction extends VMInvokable {
     }
 }
 
-const PROTO_NUMBER = new VMObject();
-const PROTO_BOOLEAN = new VMObject();
 
-const PROTO_STRING = new VMObject();
 PROTO_STRING.setProperty('replace', nativeVMFunc((vm, subject, args) => {
     if (typeof subject.primitive !== 'string')
         vm.throwTypeError('String.prototype.replace must be called on a string primitive');
@@ -201,6 +201,16 @@ PROTO_STRING.setProperty('replace', nativeVMFunc((vm, subject, args) => {
 
     return {type: 'string', value: retStr};
 }))
+
+
+PROTO_NUMBER.setProperty('toString', nativeVMFunc((vm, subject, args) => {
+    if (subject.type !== 'number')
+        vm.throwTypeError('Number.prototype.toString must be called on number');
+
+    assert (typeof subject.value === 'number');
+    return Number.prototype.toString.call(subject.value);
+}))
+
 
 class Scope {
     constructor() {

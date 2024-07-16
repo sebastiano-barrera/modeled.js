@@ -55,6 +55,7 @@ class VMObject {
 
         return this.properties.get(name) || { type: 'undefined' }
     }
+    hasOwnProperty(name) { return this.properties.has(name); }
     getProperty(name, vm = undefined) {
         assert (typeof name === 'string');
         
@@ -117,7 +118,7 @@ class VMFunction extends VMInvokable {
         for (const ndx in this.params) {
             const name = this.params[ndx];
             const value = args[ndx] || { type: 'undefined' };
-            vm.defineVar(name, value);
+            vm.defineVar('var', name, value);
         }
 
         try { vm.runStmt(this.body) }
@@ -167,7 +168,11 @@ class VarScope {
         this.parent = null
     }
 
-    defineVar(name, value) {
+    defineVar(kind, name, value) {
+        assert (
+            kind === 'var' || kind === 'let' || kind === 'const',
+            "`kind` must be one of 'var', 'let', or 'const'"
+        );
         assert(typeof name === 'string', 'var name must be string');
         this.vars.set(name, value);
     }
@@ -203,8 +208,18 @@ class EnvScope {
         this.dontDelete = new Set();
     }
 
-    defineVar(name, value) { this.env.setProperty(name, value); }
-    setVar(name, value) { this.defineVar(name, value); }
+    defineVar(kind, name, value) {
+        assert (
+            kind === 'var' || kind === 'let' || kind === 'const',
+            "`kind` must be one of 'var', 'let', or 'const'"
+        );
+        this.env.setProperty(name, value);
+    }
+    setVar(name, value) {
+        // afaiu, this assert can only fail with a bug
+        assert(this.env.hasProperty(name), 'assignment to undeclared global variable: ' + name);
+        this.env.setProperty(name, value);
+    }
 
     lookupVar(name) {
         // TODO! only the innermost scope is used
@@ -234,11 +249,11 @@ export class VM {
     // VM state (variables, stack, heap, ...)
     //
 
-    defineVar(name, value) { return this.currentScope.defineVar(name, value); }
-    setVar(name, value)    { return this.currentScope.setVar(name, value); }
-    deleteVar(name)        { return this.currentScope.deleteVar(name); }
-    lookupVar(name, value) { return this.currentScope.lookupVar(name, value); }
-    setDoNotDelete(name)   { return this.currentScope.setDoNotDelete(name); }
+    defineVar(kind, name, value) { return this.currentScope.defineVar(kind, name, value); }
+    setVar(name, value)          { return this.currentScope.setVar(name, value); }
+    deleteVar(name)              { return this.currentScope.deleteVar(name); }
+    lookupVar(name, value)       { return this.currentScope.lookupVar(name, value); }
+    setDoNotDelete(name)         { return this.currentScope.setDoNotDelete(name); }
     #withScope(inner) {
         const scope = new VarScope()
         scope.parent = this.currentScope;
@@ -313,6 +328,7 @@ export class VM {
                 if (err instanceof ProgramException) {
                     return {
                         outcome: 'error',
+                        message: err.exceptionValue.getProperty('message'),
                         error: err,
                     }
                 }
@@ -375,7 +391,7 @@ export class VM {
                     const paramName = stmt.handler.param.name;
                     const body = stmt.handler.body;
                     this.#withScope(() => {
-                        this.defineVar(paramName, err.exceptionValue);
+                        this.defineVar('var', paramName, err.exceptionValue);
                         this.setDoNotDelete(paramName);
                         this.runStmt(body);
                     });
@@ -402,7 +418,7 @@ export class VM {
                 assert(!stmt.generator,  "unsupported func decl type: generator");
                 assert(!stmt.async,      "unsupported func decl type: async");
 
-                this.defineVar(name, this.makeFunction(stmt.params, stmt.body));
+                this.defineVar('var', name, this.makeFunction(stmt.params, stmt.body));
                 
             } else {
                 throw new VMError('unsupported identifier for function declaration: ' + Deno.inspect(stmt.id));
@@ -433,7 +449,7 @@ export class VM {
                 if (decl.id.type === "Identifier") {
                     const name = decl.id.name;
                     const value = decl.init ? this.evalExpr(decl.init) : { type: 'undefined' };
-                    this.defineVar(name, value);
+                    this.defineVar(node.kind, name, value);
 
                 } else {
                     throw new VMError("unsupported declarator id type: " + decl.id.type)

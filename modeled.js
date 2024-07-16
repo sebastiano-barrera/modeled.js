@@ -112,12 +112,17 @@ PROTO_FUNCTION.setProperty('bind', nativeVMFunc((vm, outerInvokable, args) => {
         return outerInvokable.invoke(vm, forcedSubject, args)
     })
 }))
-PROTO_FUNCTION.setProperty('apply', nativeVMFunc((vm, outerInvokable, args) => {
+PROTO_FUNCTION.setProperty('call', nativeVMFunc((vm, outerInvokable, args) => {
     const forcedSubject = args[0];
     // force subject to be this inner subject passed here
     return outerInvokable.invoke(vm, forcedSubject, args.slice(1))
 }))
-
+PROTO_FUNCTION.setProperty('apply', nativeVMFunc((vm, outerInvokable, args) => {
+    const forcedSubject = args[0];
+    const argsArray = args[1];
+    // force subject to be this inner subject passed here
+    return outerInvokable.invoke(vm, forcedSubject, argsArray)
+}))
 
 class VMFunction extends VMInvokable {
     constructor(params, body) {
@@ -128,8 +133,16 @@ class VMFunction extends VMInvokable {
     }
 
     invoke(vm, subject, args) {
+        // do this substitution
+        if (!vm.currentScope.isStrict()) {
+            if (subject.type === 'undefined' || (subject.type === 'object' && subject.value === null))
+                subject = vm.globalObj;
+            subject = vm.coerceToObject(subject);
+        }
+
         return vm.withScope(() => {
             vm.currentScope.this = subject;
+            assert(vm.currentScope.isStrict() || subject instanceof VMObject);
             vm.currentScope.isCallWrapper = true;
 
             for (const ndx in this.params) {
@@ -181,11 +194,34 @@ PROTO_STRING.setProperty('replace', nativeVMFunc((vm, subject, args) => {
     return {type: 'string', value: retStr};
 }))
 
-
-class VarScope {
+class Scope {
     constructor() {
-        this.vars = new Map()
+        if (this.constructor === Scope) throw 'no!';
         this.parent = null
+        this.isSetStrict = false
+    }
+
+    walkParents(fn) {
+        let scope = this;
+        while (scope !== null) {
+            const ret = fn(scope);
+            if (typeof ret !== 'undefined')
+                return ret;
+            scope = scope.parent;
+        }
+    }
+
+    isStrict() {
+        return this.walkParents(scope => {
+            if (scope.isSetStrict) return true;
+        }) || false
+    }
+}
+
+class VarScope extends Scope {
+    constructor() {
+        super();
+        this.vars = new Map()
         // true iff this scope is the function's wrapper
         //  - each function has at least 2 nested scopes:
         //     - wrapper: only arguments are defined
@@ -238,8 +274,9 @@ class VarScope {
     }
 }
 
-class EnvScope {
+class EnvScope extends Scope {
     constructor(env) {
+        super();
         assert (env instanceof VMObject, "environment must be an object");
         this.env = env;
         this.dontDelete = new Set();
@@ -847,11 +884,15 @@ export class VM {
             return this.performCall(callee, callThis, args);
         },
 
-        ThisExpression(expr) { 
+        ThisExpression(expr) {
             for (let scope=this.currentScope; scope; scope = scope.parent) {
-                if (scope.this) return scope.this;
+                if (scope.this) {
+                    return scope.this;
+                }
             }
-            return {type: 'undefined'};
+
+            const isStrict = this.currentScope.isStrict();
+            return isStrict ? {type: 'undefined'} : this.globalObj;
         },
 
         Identifier(node) {
@@ -866,9 +907,14 @@ export class VM {
                 assert (typeof value === type);
                 return {type, value};
 
-            } else if(node.value instanceof RegExp) {
-                const regexp_cons = this.globalObj.getProperty('RegExp')
-                return regexp_cons._fromNativeRegExp(node.value);
+            } else if(type === 'object') {
+                if (node.value instanceof RegExp) {
+                    const regexp_cons = this.globalObj.getProperty('RegExp')
+                    return regexp_cons._fromNativeRegExp(node.value);
+
+                } else if (node.value === null) {
+                    return {type: 'object', value: null};
+                }
 
             } else {
                 throw new VMError(`unsupported literal value: ${typeof node.value} ${Deno.inspect(node.value)}`);

@@ -130,11 +130,12 @@ class VMFunction extends VMInvokable {
         this.params = params;
         this.body = body;
         this.parentScope = null;
+        this.isStrict = false;
     }
 
     invoke(vm, subject, args) {
         // do this substitution
-        if (!vm.currentScope.isStrict()) {
+        if (!this.isStrict) {
             if (subject.type === 'undefined' || (subject.type === 'object' && subject.value === null))
                 subject = vm.globalObj;
             subject = vm.coerceToObject(subject);
@@ -142,7 +143,7 @@ class VMFunction extends VMInvokable {
 
         return vm.withScope(() => {
             vm.currentScope.this = subject;
-            assert(vm.currentScope.isStrict() || subject instanceof VMObject);
+            assert(this.isStrict || subject instanceof VMObject);
             vm.currentScope.isCallWrapper = true;
 
             for (const ndx in this.params) {
@@ -490,7 +491,7 @@ export class VM {
                 assert(!stmt.expression, "unsupported func decl type: expression");
                 assert(!stmt.generator,  "unsupported func decl type: generator");
                 assert(!stmt.async,      "unsupported func decl type: async");
-
+                
                 this.defineVar('var', name, this.makeFunction(stmt.params, stmt.body));
                 
             } else {
@@ -573,6 +574,17 @@ export class VM {
 
         const func = new VMFunction(params, body);
         func.parentScope = this.currentScope;
+        func.isStrict = this.currentScope.isStrict();
+
+        if (!func.isStrict && body.type === "BlockStatement") {
+            const stmts = body.body;
+            func.isStrict = (
+                stmts.length > 0
+                && stmts[0].type === "ExpressionStatement"
+                && stmts[0].directive === "use strict"
+            );
+        }
+        
         return func;
     }
 

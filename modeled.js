@@ -1220,27 +1220,21 @@ function createGlobalObject() {
     }));
 
     G.setProperty('Function', nativeVMFunc((vm, subject, args) => {
-        if (subject.type === 'object') {
-            // invoked as `new Function(...)`
-            // discard this, return another object
+        // even when invoked as `new Function(...)`, discard this, return another object
 
-            if (args.length === 0 || args[0].type !== 'string')
-                vm.throwTypeError("new Function() must be invoked with function's body as text (string)");
-            
-            const text = args[0].value;
-            const ast = acorn.parse(text, {
-                ecmaVersion: 'latest',
-                allowReturnOutsideFunction: true,
-                directSourceFile: new SourceWrapper(text),
-                locations: true,
-            });
-            assert (ast.type === 'Program');
-            ast.type = 'BlockStatement';
-            return vm.makeFunction([], ast);
-
-        } else {
-            throw new VMError("not supported: invoking Function directly");
-        }
+        if (args.length === 0 || args[0].type !== 'string')
+            vm.throwTypeError("new Function() must be invoked with function's body as text (string)");
+        
+        const text = args[0].value;
+        const ast = acorn.parse(text, {
+            ecmaVersion: 'latest',
+            allowReturnOutsideFunction: true,
+            directSourceFile: new SourceWrapper(text),
+            locations: true,
+        });
+        assert (ast.type === 'Program');
+        ast.type = 'BlockStatement';
+        return vm.makeFunction([], ast);
     }));
     G.getProperty('Function').setProperty('prototype', PROTO_FUNCTION);
 

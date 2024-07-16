@@ -165,6 +165,7 @@ class VMFunction extends VMInvokable {
             vm.currentScope.this = subject;
             assert(this.isStrict || subject instanceof VMObject);
             vm.currentScope.isCallWrapper = true;
+            vm.currentScope.isSetStrict = this.isStrict;
 
             for (const ndx in this.params) {
                 const name = this.params[ndx];

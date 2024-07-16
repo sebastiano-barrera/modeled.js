@@ -146,7 +146,6 @@ class VMFunction extends VMInvokable {
         }
 
         return vm.withScope(() => {
-            console.log(' invoke with this = ', subject);
             vm.currentScope.this = subject;
             assert(this.isStrict || subject instanceof VMObject);
             vm.currentScope.isCallWrapper = true;
@@ -443,9 +442,14 @@ export class VM {
     }
 
     runBlockBody(body) {
+        let completion;
+
         for (const stmt of body) {
-            this.runStmt(stmt);
+            // last iteration's CV becomes block's CV
+            completion = this.runStmt(stmt);
         }
+
+        return completion;
     }
 
     runStmt(stmt) {
@@ -471,19 +475,21 @@ export class VM {
     }
 
     stmts = {
+        // each of these handlers returns the *completion value* of the statement (if any)
+
         EmptyStatement(stmt) { },
 
         /** @this VM */
         BlockStatement(stmt) {
             return this.withScope(() => {
-            this.runBlockBody(stmt.body);
+                return this.runBlockBody(stmt.body);
             });
         },
 
         /** @this VM */
         TryStatement(stmt) {
             try {
-                this.withScope(() => this.runStmt(stmt.block));
+                return this.withScope(() => this.runStmt(stmt.block));
             } catch(err) {
                 if (err instanceof ProgramException && stmt.handler) {
                     assert(stmt.handler.type === 'CatchClause', "parser bug: try statement's handler must be CatchClause");
@@ -519,7 +525,10 @@ export class VM {
                 assert(!stmt.generator,  "unsupported func decl type: generator");
                 assert(!stmt.async,      "unsupported func decl type: async");
                 
-                this.defineVar('var', name, this.makeFunction(stmt.params, stmt.body));
+                const func = this.makeFunction(stmt.params, stmt.body);
+                this.defineVar('var', name, func);
+
+                return func;
                 
             } else {
                 throw new VMError('unsupported identifier for function declaration: ' + Deno.inspect(stmt.id));
@@ -527,23 +536,25 @@ export class VM {
         },
 
         ExpressionStatement(stmt) {
-            // discard return value
-            this.evalExpr(stmt.expression);
+            // expression value becomes completion value
+            return this.evalExpr(stmt.expression);
         },
 
         IfStatement(stmt) {
             const test = this.evalExpr(stmt.test);
 
             if (this.isTruthy(test)) {
-                this.runStmt(stmt.consequent);
+                return this.runStmt(stmt.consequent);
             } else if (stmt.alternate) {
-                this.runStmt(stmt.alternate);
+                return this.runStmt(stmt.alternate);
             }
         },
         
         VariableDeclaration(node) {
             if (node.kind !== "var" && node.kind !== "let" && node.kind !== "const")
                 throw new VMError('unsupported var decl type: ' + node.kind);
+
+            let completion;
 
             for (const decl of node.declarations) {
                 assert (decl.type === 'VariableDeclarator', "decl type must be VariableDeclarator");
@@ -552,10 +563,15 @@ export class VM {
                     const value = decl.init ? this.evalExpr(decl.init) : { type: 'undefined' };
                     this.defineVar(node.kind, name, value);
 
+                    if (node.declarations.length === 1)
+                        completion = value;
+
                 } else {
                     throw new VMError("unsupported declarator id type: " + decl.id.type)
                 }
             }
+            
+            return completion;
         },
 
         ReturnStatement(node) {
@@ -569,14 +585,19 @@ export class VM {
         /** @this VM */
         ForStatement(node) {
             this.withScope(() => {
+                let completion;
+
                 for(node.init.type === 'VariableDeclaration' 
                         ? this.runStmt(node.init) 
                         : this.evalExpr(node.init);
                     this.isTruthy(this.evalExpr(node.test));
                     this.evalExpr(node.update)
                 ) {
-                    this.runStmt(node.body);
+                    // keep overwriting, return the last iteration's completion value
+                    completion = this.runStmt(node.body);
                 }
+
+                return completion;
             });
         },
     }

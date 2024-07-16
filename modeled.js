@@ -105,6 +105,13 @@ class VMInvokable extends VMObject {
 }
 
 const PROTO_FUNCTION = new VMObject(PROTO_OBJECT)
+PROTO_FUNCTION.setProperty('bind', nativeVMFunc((vm, outerInvokable, args) => {
+    const forcedSubject = args[0];
+    return nativeVMFunc((vm, _, args) => {
+        // force subject to be this inner subject passed here
+        return outerInvokable.invoke(vm, forcedSubject, args)
+    })
+}))
 
 class VMFunction extends VMInvokable {
     constructor(params, body) {

@@ -115,22 +115,29 @@ class VMFunction extends VMInvokable {
     }
 
     invoke(vm, subject, args) {
-        for (const ndx in this.params) {
-            const name = this.params[ndx];
-            const value = args[ndx] || { type: 'undefined' };
-            vm.defineVar('var', name, value);
-        }
+        return vm.withScope(() => {
+            vm.currentScope.this = subject;
+            vm.currentScope.isCallWrapper = true;
 
-        try { vm.runStmt(this.body) }
-        catch (e) {
-            if (e.returnValue) {
-                assert (typeof e.returnValue.type === 'string', "return value uninitialized!");
-                return e.returnValue;
+            for (const ndx in this.params) {
+                const name = this.params[ndx];
+                const value = args[ndx] || { type: 'undefined' };
+                vm.defineVar('var', name, value);
             }
-            throw e;
-        }
 
-        return {type: "undefined"}
+            return vm.withScope(() => {
+                try { vm.runStmt(this.body) }
+                catch (e) {
+                    if (e.returnValue) {
+                        assert (typeof e.returnValue.type === 'string', "return value uninitialized!");
+                        return e.returnValue;
+                    }
+                    throw e;
+                }
+    
+                return {type: "undefined"}
+            })
+        })
     }
 }
 
@@ -166,14 +173,31 @@ class VarScope {
     constructor() {
         this.vars = new Map()
         this.parent = null
+        // true iff this scope is the function's wrapper
+        //  - each function has at least 2 nested scopes:
+        //     - wrapper: only arguments are defined
+        //     - body: this corresponds to the function's body in { }
+        // this allows us to allow var to redefine an argument in the function
+        this.isCallWrapper = false
     }
 
     defineVar(kind, name, value) {
+        // var decls bubble up to the top of the function's body
+        if (kind === 'var' && !this.isCallWrapper) {
+            return this.parent.defineVar(kind, name, value);
+        }
+
         assert (
             kind === 'var' || kind === 'let' || kind === 'const',
             "`kind` must be one of 'var', 'let', or 'const'"
         );
         assert(typeof name === 'string', 'var name must be string');
+
+        if (this.vars.has(name)) {
+            // redefinition, discard
+            return;
+        }
+
         this.vars.set(name, value);
     }
 
@@ -217,7 +241,7 @@ class EnvScope {
     }
     setVar(name, value) {
         // afaiu, this assert can only fail with a bug
-        assert(this.env.hasProperty(name), 'assignment to undeclared global variable: ' + name);
+        assert(this.env.hasOwnProperty(name), 'assignment to undeclared global variable: ' + name);
         this.env.setProperty(name, value);
     }
 
@@ -254,7 +278,7 @@ export class VM {
     deleteVar(name)              { return this.currentScope.deleteVar(name); }
     lookupVar(name, value)       { return this.currentScope.lookupVar(name, value); }
     setDoNotDelete(name)         { return this.currentScope.setDoNotDelete(name); }
-    #withScope(inner) {
+    withScope(inner) {
         const scope = new VarScope()
         scope.parent = this.currentScope;
         this.currentScope = scope;
@@ -358,10 +382,7 @@ export class VM {
         assert (callee instanceof VMInvokable, 'you can only call a function (native or virtual), not ' + Deno.inspect(callee));
         assert (subject.type, 'subject should be a VM value');
 
-        return this.#withScope(() => {
-            this.currentScope.this = subject;
-            return callee.invoke(this, subject, args);
-        })
+        return callee.invoke(this, subject, args);
     }
 
     #dispatch(node, table) {
@@ -382,7 +403,7 @@ export class VM {
         /** @this VM */
         TryStatement(stmt) {
             try {
-                this.#withScope(() => this.runStmt(stmt.block));
+                this.withScope(() => this.runStmt(stmt.block));
             } catch(err) {
                 if (err instanceof ProgramException && stmt.handler) {
                     assert(stmt.handler.type === 'CatchClause', "parser bug: try statement's handler must be CatchClause");
@@ -390,7 +411,7 @@ export class VM {
                     
                     const paramName = stmt.handler.param.name;
                     const body = stmt.handler.body;
-                    this.#withScope(() => {
+                    this.withScope(() => {
                         this.defineVar('var', paramName, err.exceptionValue);
                         this.setDoNotDelete(paramName);
                         this.runStmt(body);
@@ -403,7 +424,7 @@ export class VM {
                 }
             } finally {
                 if (stmt.finalizer) 
-                    this.#withScope(() => this.runStmt(stmt.finalizer));
+                    this.withScope(() => this.runStmt(stmt.finalizer));
             }
         },
         ThrowStatement(stmt) {
@@ -467,7 +488,7 @@ export class VM {
 
         /** @this VM */
         ForStatement(node) {
-            this.#withScope(() => {
+            this.withScope(() => {
                 for(node.init.type === 'VariableDeclaration' 
                         ? this.runStmt(node.init) 
                         : this.evalExpr(node.init);

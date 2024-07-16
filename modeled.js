@@ -553,6 +553,26 @@ export class VM {
         this.throwTypeError("can't convert value to object: " + Deno.inspect(value));
     }
 
+    coerceToBoolean(value) {
+        let ret;
+
+        if (value.type === 'boolean') { ret = value.value; }
+        else if (value.type === 'undefined') { ret = false; }
+        else if (value.type === 'number') {
+            // includes both +0 and -0
+            ret = value.value !== 0 && !Number.isNaN(value.value);
+        }
+        else if (value.type === 'bigint') { ret = value.value !== 0n; }
+        else if (value.type === 'string') { ret = value.value !== ''; }
+        else if (value.type === 'symbol') { ret = true; }
+        else if (value.type === 'object') { ret = !(value instanceof VMObject); }
+        else {
+            this.throwTypeError("can't convert value to boolean: " + Deno.inspect(value));
+        }
+
+        return {type: 'boolean', value: ret};
+    }
+
     exprs = {
         AssignmentExpression(expr) {
             let value = this.evalExpr(expr.right);
@@ -665,6 +685,14 @@ export class VM {
             } else if (expr.operator === 'typeof') {
                 const value = this.evalExpr(expr.argument);
                 return {type: 'string', value: value.type};
+
+            } else if (expr.operator === '!') {
+                assert (expr.prefix === true, "only supported: expr.prefix === true");
+                const value = this.coerceToBoolean(this.evalExpr(expr.argument));
+                assert (value.type === 'boolean');
+                assert (typeof value.value === 'boolean');
+                value.value = !value.value;
+                return value;
 
             } else {
                 throw new VMError('unsupported unary op: ' + expr.operator);

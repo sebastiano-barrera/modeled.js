@@ -1044,7 +1044,23 @@ export class VM {
         left = this.evalExpr(left);
         right = this.evalExpr(right);
 
-        const value = (left.type === right.type && left.value === right.value);
+        if (left.type !== right.type)
+            return {type: 'boolean', value: false};
+
+        const t = left.type;
+        let value;
+        if (t === 'object') 
+            value = (left.value === null && right.value === null) || Object.is(left, right);
+        else if (t === 'boolean') value = (left.value === right.value);
+        else if (t === 'string') value = (left.value === right.value);
+        else if (t === 'number') value = (left.value === right.value);
+        else if (t === 'bigint') value = (left.value === right.value);
+        else if (t === 'undefined') value = true;
+        else {
+            throw new VMError('unsupported strict equality for ' + t);
+        }
+
+        assert (typeof value === 'boolean');
         return { type: 'boolean', value };
     }
 

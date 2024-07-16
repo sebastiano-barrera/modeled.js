@@ -125,13 +125,17 @@ PROTO_FUNCTION.setProperty('apply', nativeVMFunc((vm, outerInvokable, args) => {
 }))
 
 class VMFunction extends VMInvokable {
+    #isStrict = false;
+
     constructor(params, body) {
         super();
         this.params = params;
         this.body = body;
         this.parentScope = null;
-        this.isStrict = false;
     }
+    
+    get isStrict() { return this.#isStrict; }
+    setStrict() { this.#isStrict = true; } 
 
     invoke(vm, subject, args) {
         // do this substitution
@@ -142,6 +146,7 @@ class VMFunction extends VMInvokable {
         }
 
         return vm.withScope(() => {
+            console.log(' invoke with this = ', subject);
             vm.currentScope.this = subject;
             assert(this.isStrict || subject instanceof VMObject);
             vm.currentScope.isCallWrapper = true;
@@ -423,13 +428,32 @@ export class VM {
         });
     }
 
+    directEval(text) {
+        const ast = acorn.parse(text, {
+            ecmaVersion: 'latest',
+            directSourceFile: new SourceWrapper(text),
+            locations: true,
+        });
+
+        // force the semantics of a BlockStatement on the AST's root, then run
+        // and return the completion value
+        assert (ast.type === 'Program', "result of parser is expected to be a Program");
+        ast.type = 'BlockStatement';
+        return this.runStmt(ast);
+    }
+
     runBlockBody(body) {
         for (const stmt of body) {
             this.runStmt(stmt);
         }
     }
 
-    runStmt(stmt) { return this.#dispatch(stmt, this.stmts) }
+    runStmt(stmt) {
+        const completionValue = this.#dispatch(stmt, this.stmts)
+        if (typeof completionValue === 'undefined')
+            return { type: 'undefined' }; // default completion value
+        return completionValue;
+    }
 
     performCall(callee, subject, args) {
         assert (callee instanceof VMInvokable, 'you can only call a function (native or virtual), not ' + Deno.inspect(callee));
@@ -449,8 +473,11 @@ export class VM {
     stmts = {
         EmptyStatement(stmt) { },
 
+        /** @this VM */
         BlockStatement(stmt) {
+            return this.withScope(() => {
             this.runBlockBody(stmt.body);
+            });
         },
 
         /** @this VM */
@@ -574,15 +601,18 @@ export class VM {
 
         const func = new VMFunction(params, body);
         func.parentScope = this.currentScope;
-        func.isStrict = this.currentScope.isStrict();
+        if (this.currentScope.isStrict())
+            func.setStrict();
 
         if (!func.isStrict && body.type === "BlockStatement") {
             const stmts = body.body;
-            func.isStrict = (
+            if (
                 stmts.length > 0
                 && stmts[0].type === "ExpressionStatement"
                 && stmts[0].directive === "use strict"
-            );
+            ) {
+                func.setStrict();
+            }
         }
         
         return func;
@@ -884,6 +914,19 @@ export class VM {
                 callee = callThis.getProperty(name);
                 if (callee.type === 'undefined') {
                     throw new VMError(`can't find method ${name} in ${Deno.inspect(callThis)}`);
+                }
+
+            } else if (expr.callee.type === 'Identifier' && expr.callee.name === 'eval') {
+                // direct eval
+                
+                if (expr.arguments.length === 0)
+                    return { type: "undefined" };
+
+                const arg = this.evalExpr(expr.arguments[0]);
+                if (arg.type === 'string') {
+                    return this.directEval(arg.value);
+                } else {
+                    return arg;
                 }
 
             } else {

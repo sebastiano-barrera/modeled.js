@@ -44,13 +44,10 @@ class VMObject {
     }
 
     getOwnProperty(name, vm = undefined) {
-        const descriptorValue = this.describedProperties.get(name)
-        if (descriptorValue) {
-            assert (descriptorValue instanceof VMObject);
-
-            const getter = descriptorValue.getProperty('get');
+        const descriptor = this.describedProperties.get(name)
+        if (descriptor) {
             assert (vm instanceof VM, "looking up described value but vm not passed");
-            return vm.performCall(getter, this, []);
+            return vm.performCall(descriptor.get, this, []);
         }
 
         return this.properties.get(name) || { type: 'undefined' }
@@ -71,21 +68,26 @@ class VMObject {
         return {type: 'undefined'};
     }
     setProperty(name, value, vm = undefined) {
-        const descriptorValue = this.describedProperties.get(name)
-        if (descriptorValue) {
-            assert (descriptorValue instanceof VMObject);
-            const setter = descriptorValue.getProperty('set');
+        const descriptor = this.describedProperties.get(name)
+        if (descriptor) {
+            const setter = descriptor.set;
             assert (vm instanceof VM, "looking up described value but vm not passed");
             return vm.performCall(setter, this, [value]);
         }
 
         return this.properties.set(name, value)
     }
-    setDescribedProperty(name, descriptorValue) {
+    setDescribedProperty(name, descriptorMember, value) {
         // descriptorValue is a VM value
         assert (typeof name === 'string');
-        assert (descriptorValue instanceof VMObject);
-        this.describedProperties.set(name, descriptorValue)
+        assert (['get', 'set'].includes(descriptorMember));
+        assert (value instanceof VMInvokable);
+
+        if (!this.describedProperties.has(name)) {
+            this.describedProperties.set(name, {})
+        }
+
+        this.describedProperties.get(name)[descriptorMember] = value;
     }
     deleteProperty(name) { return this.properties.delete(name) }
 
@@ -794,16 +796,29 @@ export class VM {
             const obj = new VMObject();
 
             for (const propertyNode of expr.properties) {
-                assert (propertyNode.type === 'Property');                
-                assert (propertyNode.method === false);                
-                assert (propertyNode.shorthand === false);                
-                assert (propertyNode.computed === false);                
-                assert (propertyNode.kind === 'init');                
+                assert (propertyNode.type === 'Property', "node's type === 'Property'");
+                assert (propertyNode.method === false, "node's method === false");
+                assert (propertyNode.shorthand === false, "node's shorthand === false");
+                assert (propertyNode.computed === false, "node's computed === false");
 
                 assert (propertyNode.key.type === 'Identifier');
                 const key = propertyNode.key.name;
-                const value = this.evalExpr(propertyNode.value);
-                obj.setProperty(key, value);
+
+                if (propertyNode.kind === 'init') {
+                    const value = this.evalExpr(propertyNode.value);
+                    obj.setProperty(key, value);
+    
+                } else if (propertyNode.kind === 'get') {
+                    const getter = this.evalExpr(propertyNode.value);
+                    if (!(getter instanceof VMInvokable)) {
+                        throw new VMError("VM bug: getter was not evaluated as function?");
+                    }
+                    obj.setDescribedProperty(key, 'get', getter);
+
+                } else {
+                    throw new VMError("unsupported property kind: " + propertyNode.kind);
+                }
+
             }
 
             return obj;
@@ -1132,7 +1147,10 @@ function createGlobalObject() {
         if (!(descriptor instanceof VMObject))
             vm.throwTypeError("Object.defineProperty: third argument must be object");
 
-        obj.setDescribedProperty(name.value, descriptor);
+        for (const member of ['get', 'set']) {
+            const descrVal = descriptor.getProperty(member);
+            obj.setDescribedProperty(name.value, member, descriptor);
+        }
         return {type: 'undefined'};
     }));
     G.setProperty('Object', consObject);

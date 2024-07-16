@@ -124,6 +124,9 @@ PROTO_FUNCTION.setProperty('apply', nativeVMFunc((vm, outerInvokable, args) => {
     return outerInvokable.invoke(vm, forcedSubject, argsArray)
 }))
 
+PROTO_OBJECT.setProperty('toString', nativeVMFunc(() => ({ type: 'string', value: '[object Object]' })));
+
+
 class VMFunction extends VMInvokable {
     #isStrict = false;
 
@@ -1007,15 +1010,23 @@ export class VM {
         return { type: 'boolean', value };
     }
 
-    valueToPrimitive(value) {
+    valueToPrimitive(value, order = 'valueOf first') {
         if (value instanceof VMObject) {
-            for (const methodName of ['valueOf', 'toString']) {
-                const method = value.getOwnProperty(methodName);
-                if (method.type !== 'function') continue;
+            let methods = {
+                'valueOf first': ['valueOf', 'toString'],
+                'toString first': ['toString', 'valueOf'],
+            }[order];
+            if (methods === undefined)
+                throw new VMError('invalid value for arg "order": ' + order);
 
-                const ret = this.performCall(method, value, []);
-                if (ret.type !== 'object') return ret;
-                
+            for (const methodName of methods) {
+                const method = value.getProperty(methodName);
+                if (method instanceof VMInvokable) {
+                    const ret = method.invoke(this, value, []);
+                    // primitive: can be used
+                    if (ret.type !== 'object' && ret.type !== 'undefined')
+                        return ret;
+                }
             }
 
             return { type: 'undefined' };
@@ -1027,16 +1038,31 @@ export class VM {
     }
 
     valueToString(value) {
-        if (value instanceof VMObject) {
-            throw new VMError('bug: value must be primitive')
+        if (value.type === 'object') {
+            if (value.value === null) return {type: 'undefined', value: 'null'};
+
+            // Objects are first converted to a primitive by calling its [Symbol.toPrimitive]() (with "string" as hint), toString(), and valueOf() methods, in that order. The resulting primitive is then converted to a string.
+            const prim = this.valueToPrimitive(value, 'toString first');
+            if (prim.type === 'undefined') { 
+                throw new VMError('VM bug: object could not be converted to string (at least Object.prototype.toString should have been called)')
+            }
+
+            assert (prim.type !== 'object');
+            return this.valueToString(prim);
         }
 
-        assert (value.type === typeof value.value, 'invalid value');
+        assert (value.type === typeof value.value, "VM bug: invalid primitive value");
+        let str; 
+        if (value.type === 'string') str = value.value;
+        else if (value.type === 'undefined') str = 'undefined';
+        else if (value.type === 'boolean') str = value.value ? 'true' : 'false';
+        else if (value.type === 'number') str = Number.prototype.toString.call(value.value);
+        else if (value.type === 'bigint') str = BigInt.prototype.toString.call(value.value);
+        else if (value.type === 'symbol') str = Symbol.prototype.toString.call(value.value);
+        else throw new VMError('invalid value type: ' + value.type);
 
-        return {
-            type: 'string', 
-            value: '' + value.value
-        };
+        assert (typeof str === 'string');
+        return {type: 'string', value: str};
     }
 }
 

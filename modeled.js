@@ -112,6 +112,12 @@ PROTO_FUNCTION.setProperty('bind', nativeVMFunc((vm, outerInvokable, args) => {
         return outerInvokable.invoke(vm, forcedSubject, args)
     })
 }))
+PROTO_FUNCTION.setProperty('apply', nativeVMFunc((vm, outerInvokable, args) => {
+    const forcedSubject = args[0];
+    // force subject to be this inner subject passed here
+    return outerInvokable.invoke(vm, forcedSubject, args.slice(1))
+}))
+
 
 class VMFunction extends VMInvokable {
     constructor(params, body) {

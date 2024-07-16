@@ -808,12 +808,12 @@ export class VM {
                     const value = this.evalExpr(propertyNode.value);
                     obj.setProperty(key, value);
     
-                } else if (propertyNode.kind === 'get') {
-                    const getter = this.evalExpr(propertyNode.value);
-                    if (!(getter instanceof VMInvokable)) {
-                        throw new VMError("VM bug: getter was not evaluated as function?");
+                } else if (propertyNode.kind === 'get' || propertyNode.kind === 'set') {
+                    const func = this.evalExpr(propertyNode.value);
+                    if (!(func instanceof VMInvokable)) {
+                        throw new VMError("VM bug: getter/setter was not evaluated as function?");
                     }
-                    obj.setDescribedProperty(key, 'get', getter);
+                    obj.setDescribedProperty(key, propertyNode.kind, func);
 
                 } else {
                     throw new VMError("unsupported property kind: " + propertyNode.kind);
@@ -1149,7 +1149,11 @@ function createGlobalObject() {
 
         for (const member of ['get', 'set']) {
             const descrVal = descriptor.getProperty(member);
-            obj.setDescribedProperty(name.value, member, descriptor);
+            if (descrVal.type === 'undefined')
+                continue;
+            if (!(descrVal instanceof VMInvokable))
+                vm.throwTypeError(`value for descriptor.${member} is not function: `, descrVal);
+            obj.setDescribedProperty(name.value, member, descrVal);
         }
         return {type: 'undefined'};
     }));

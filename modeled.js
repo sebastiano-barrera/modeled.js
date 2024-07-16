@@ -48,7 +48,7 @@ class VMObject {
         if (descriptorValue) {
             assert (descriptorValue instanceof VMObject);
 
-            const getter = descriptorValue.getOwnProperty('get');
+            const getter = descriptorValue.getProperty('get');
             assert (vm instanceof VM, "looking up described value but vm not passed");
             return vm.performCall(getter, this, []);
         }
@@ -70,7 +70,15 @@ class VMObject {
 
         return {type: 'undefined'};
     }
-    setProperty(name, value) {
+    setProperty(name, value, vm = undefined) {
+        const descriptorValue = this.describedProperties.get(name)
+        if (descriptorValue) {
+            assert (descriptorValue instanceof VMObject);
+            const setter = descriptorValue.getProperty('set');
+            assert (vm instanceof VM, "looking up described value but vm not passed");
+            return vm.performCall(setter, this, [value]);
+        }
+
         return this.properties.set(name, value)
     }
     setDescribedProperty(name, descriptorValue) {
@@ -680,7 +688,7 @@ export class VM {
             assert(targetExpr.property.type === 'Identifier', 'unsupported member property: ' + targetExpr.property.type);
             const propertyName = targetExpr.property.name;
 
-            obj.setProperty(propertyName, value);
+            obj.setProperty(propertyName, value, this);
 
         } else if (targetExpr.type === "Identifier") {
             const name = targetExpr.name;

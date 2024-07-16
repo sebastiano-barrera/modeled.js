@@ -118,8 +118,8 @@ PROTO_FUNCTION.setProperty('call', nativeVMFunc((vm, outerInvokable, args) => {
     return outerInvokable.invoke(vm, forcedSubject, args.slice(1))
 }))
 PROTO_FUNCTION.setProperty('apply', nativeVMFunc((vm, outerInvokable, args) => {
-    const forcedSubject = args[0];
-    const argsArray = args[1];
+    const forcedSubject = args.length >= 1 ? args[0] : {type: 'undefined'};
+    const argsArray = args.length >= 2 ? args[1] : {type: 'undefined'};
     // force subject to be this inner subject passed here
     return outerInvokable.invoke(vm, forcedSubject, argsArray)
 }))

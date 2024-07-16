@@ -398,12 +398,14 @@ export class VM {
                 this.currentScope = null;
                 return { outcome: 'success' }
 
-            } catch (err) {
-                if (err instanceof ProgramException) {
+            } catch (error) {
+                if (error instanceof ProgramException) {
+                    const excval = error.exceptionValue;
+                    const message = excval.type === 'object' ? excval.getProperty('message') : excval; 
                     return {
                         outcome: 'error',
-                        message: err.exceptionValue.getProperty('message'),
-                        error: err,
+                        message,
+                        error,
                     }
                 }
 
@@ -415,7 +417,7 @@ export class VM {
                     this.synCtxError = [];
                 }
 
-                throw err;
+                throw error;
             }
         });
     }
@@ -619,7 +621,6 @@ export class VM {
         const excCons = this.globalObj.getProperty('TypeError');
         const messageValue = {type: 'string', value: message};
         const exc = this.performNew(excCons, [messageValue]);
-        console.log(exc)
         throw new ProgramException(exc, this.synCtx);
     }
 

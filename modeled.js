@@ -875,16 +875,16 @@ export class VM {
                 const left = this.evalExpr(expr.left);
                 const right = this.evalExpr(expr.right);
                 
-                const a = this.valueToPrimitive(left);
-                const b = this.valueToPrimitive(right);
+                const a = this.coerceToPrimitive(left);
+                const b = this.coerceToPrimitive(right);
 
                 if (a.type === 'number' && b.type === 'number') {
                     return {type: 'number', value: a.value + b.value};
                 } else {
-                    const as = this.valueToString(a);
-                    const bs = this.valueToString(b);
-                    assert (as.type === 'string', 'valueToString bug (a)');
-                    assert (bs.type === 'string', 'valueToString bug (b)');
+                    const as = this.coerceToString(a);
+                    const bs = this.coerceToString(b);
+                    assert (as.type === 'string', 'coerceToString bug (a)');
+                    assert (bs.type === 'string', 'coerceToString bug (b)');
                     return {type: 'string', value: as.value + bs.value};
                 }
             }
@@ -1010,7 +1010,7 @@ export class VM {
         return { type: 'boolean', value };
     }
 
-    valueToPrimitive(value, order = 'valueOf first') {
+    coerceToPrimitive(value, order = 'valueOf first') {
         if (value instanceof VMObject) {
             let methods = {
                 'valueOf first': ['valueOf', 'toString'],
@@ -1037,18 +1037,18 @@ export class VM {
         }
     }
 
-    valueToString(value) {
+    coerceToString(value) {
         if (value.type === 'object') {
             if (value.value === null) return {type: 'undefined', value: 'null'};
 
             // Objects are first converted to a primitive by calling its [Symbol.toPrimitive]() (with "string" as hint), toString(), and valueOf() methods, in that order. The resulting primitive is then converted to a string.
-            const prim = this.valueToPrimitive(value, 'toString first');
+            const prim = this.coerceToPrimitive(value, 'toString first');
             if (prim.type === 'undefined') { 
                 throw new VMError('VM bug: object could not be converted to string (at least Object.prototype.toString should have been called)')
             }
 
             assert (prim.type !== 'object');
-            return this.valueToString(prim);
+            return this.coerceToString(prim);
         }
 
         assert (value.type === typeof value.value, "VM bug: invalid primitive value");
@@ -1122,7 +1122,7 @@ function createGlobalObject() {
     G.setProperty('String', nativeVMFunc((vm, subject, args) => { 
         if(subject.type === 'undefined') {
             // invoked as function, not via new
-            return vm.valueToString(args[0])
+            return vm.coerceToString(args[0])
         } else {
             // invoked via new
             throw new VMError('not yet implemented: new String(...)')
@@ -1195,7 +1195,7 @@ function createGlobalObject() {
 
     G.setProperty('$print', nativeVMFunc((vm, subject, args) => {
         for (const arg of args) {
-            const prim = vm.valueToPrimitive(arg)
+            const prim = vm.coerceToPrimitive(arg)
             console.log(prim)
         }
         return {type: 'undefined'}

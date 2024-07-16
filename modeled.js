@@ -655,6 +655,7 @@ export class VM {
             return paramNode.name;
         });
 
+        assert(body.type === 'BlockStatement', "only supported: BlockStatement as function body");
         const func = new VMFunction(params, body);
         func.parentScope = this.currentScope;
         if (this.currentScope.isStrict())
@@ -688,12 +689,11 @@ export class VM {
     }
 
     performNew(constructor, args) {
-        const obj = new VMObject();
-        const retVal = this.performCall(constructor, obj, args);
-        assert (typeof retVal === 'object', 'vm bug: invalid return type from call');
+        const obj = this.performCall(constructor, new VMObject(), args);
+        assert (typeof obj === 'object', 'vm bug: invalid return type from` call');
         obj.setProperty('constructor', constructor);
         obj.proto = constructor.getProperty('prototype');
-        return retVal.type === 'undefined' ? obj : retVal;
+        return obj;
     }
 
     doAssignment(targetExpr, value) {
@@ -1218,6 +1218,31 @@ function createGlobalObject() {
 
         return {type: 'undefined'}
     }));
+
+    G.setProperty('Function', nativeVMFunc((vm, subject, args) => {
+        if (subject.type === 'object') {
+            // invoked as `new Function(...)`
+            // discard this, return another object
+
+            if (args.length === 0 || args[0].type !== 'string')
+                vm.throwTypeError("new Function() must be invoked with function's body as text (string)");
+            
+            const text = args[0].value;
+            const ast = acorn.parse(text, {
+                ecmaVersion: 'latest',
+                allowReturnOutsideFunction: true,
+                directSourceFile: new SourceWrapper(text),
+                locations: true,
+            });
+            assert (ast.type === 'Program');
+            ast.type = 'BlockStatement';
+            return vm.makeFunction([], ast);
+
+        } else {
+            throw new VMError("not supported: invoking Function directly");
+        }
+    }));
+    G.getProperty('Function').setProperty('prototype', PROTO_FUNCTION);
 
     const regexp_proto = new VMObject();
     regexp_proto.setProperty('test', nativeVMFunc((vm, subject, args) => {

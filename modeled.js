@@ -649,7 +649,7 @@ export class VM {
         return value;
     }
 
-    makeFunction(paramNodes, body) {
+    makeFunction(paramNodes, body, options = {}) {
         const params = paramNodes.map(paramNode => {
             assert(paramNode.type === 'Identifier', 'unsupported: func params of type ' + paramNode.type);
             return paramNode.name;
@@ -658,7 +658,7 @@ export class VM {
         assert(body.type === 'BlockStatement', "only supported: BlockStatement as function body");
         const func = new VMFunction(params, body);
         func.parentScope = this.currentScope;
-        if (this.currentScope.isStrict())
+        if (!options.scopeStrictnessIrrelevant && this.currentScope.isStrict())
             func.setStrict();
 
         if (!func.isStrict && body.type === "BlockStatement") {
@@ -689,8 +689,11 @@ export class VM {
     }
 
     performNew(constructor, args) {
-        const obj = this.performCall(constructor, new VMObject(), args);
-        assert (typeof obj === 'object', 'vm bug: invalid return type from` call');
+        const initObj =  new VMObject();
+        let obj = this.performCall(constructor, initObj, args);
+        if (obj.type === 'undefined') obj = initObj;
+
+        assert (obj instanceof VMObject, 'vm bug: invalid return type from constructor: ' + Deno.inspect(obj));
         obj.setProperty('constructor', constructor);
         obj.proto = constructor.getProperty('prototype');
         return obj;
@@ -1234,13 +1237,7 @@ function createGlobalObject() {
         });
         assert (ast.type === 'Program');
         ast.type = 'BlockStatement';
-        const inner = vm.makeFunction([], ast);
-        return nativeVMFunc((vm, subject, args) => {
-            if (subject.type === 'undefined' || (subject.type === 'object' && subject.value === null))
-                subject = vm.globalObj;
-        
-            return inner.invoke(vm, subject, args);
-        });
+        return vm.makeFunction([], ast, {scopeStrictnessIrrelevant: true});
     }));
     G.getProperty('Function').setProperty('prototype', PROTO_FUNCTION);
 

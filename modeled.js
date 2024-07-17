@@ -1234,7 +1234,13 @@ function createGlobalObject() {
         });
         assert (ast.type === 'Program');
         ast.type = 'BlockStatement';
-        return vm.makeFunction([], ast);
+        const inner = vm.makeFunction([], ast);
+        return nativeVMFunc((vm, subject, args) => {
+            if (subject.type === 'undefined' || (subject.type === 'object' && subject.value === null))
+                subject = vm.globalObj;
+        
+            return inner.invoke(vm, subject, args);
+        });
     }));
     G.getProperty('Function').setProperty('prototype', PROTO_FUNCTION);
 
@@ -1280,14 +1286,16 @@ function createGlobalObject() {
         // dedicated path in the parser
 
         // we're calling directEval but this is indirect eval. the scope where
-        // the passed code is evaluated is *this function's scope*, not the one
+        // the passed code is evaluated in the global scope, not the one
         // where the call appears
         if (args.length === 0)
             return {type: 'undefined'};
 
-        if (args[0].type === 'string') {
-            // the comments are from: https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/eval
+        if (args[0].type !== 'string')
+            vm.throwTypeError("eval must be called with a string");
 
+        // the comments are from:
+        // https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/eval
             let savedScope = vm.currentScope;
             let rootScope = vm.currentScope.getRoot();
             try {
@@ -1303,10 +1311,8 @@ function createGlobalObject() {
             } finally {
                 assert (savedScope instanceof Scope);
                 vm.currentScope = savedScope;
-            }
         }
 
-        vm.throwTypeError("eval must be called with a string");
     }));
 
     G.setProperty('nativeHello', nativeVMFunc((vm, subject, args) => { 

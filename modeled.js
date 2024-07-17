@@ -44,6 +44,8 @@ class VMObject {
     }
 
     getOwnProperty(name, vm = undefined) {
+        assert (typeof name === 'string');
+
         const descriptor = this.describedProperties.get(name)
         if (descriptor) {
             assert (vm instanceof VM, "looking up described value but vm not passed");
@@ -68,6 +70,8 @@ class VMObject {
         return {type: 'undefined'};
     }
     setProperty(name, value, vm = undefined) {
+        assert (typeof name === 'string');
+        
         const descriptor = this.describedProperties.get(name)
         if (descriptor) {
             const setter = descriptor.set;
@@ -101,11 +105,30 @@ class VMObject {
     }
 }
 
+class VMArray extends VMObject {
+    constructor() {
+        super(PROTO_ARRAY);
+        this.arrayElements = []
+    }
+
+    getIndex(index) {
+        return typeof index === 'number'
+            ? this.arrayElements[index]
+            : super.getIndex(index);
+    }
+
+    setIndex(index, value) {
+        if (typeof index === 'number') this.arrayElements[index] = value;
+        else return super.setIndex(index, value);
+    }
+}
+
 const PROTO_OBJECT = new VMObject(null)
 const PROTO_FUNCTION = new VMObject(PROTO_OBJECT)
 const PROTO_NUMBER = new VMObject()
 const PROTO_BOOLEAN = new VMObject()
 const PROTO_STRING = new VMObject()
+const PROTO_ARRAY = new VMObject()
 
 class VMInvokable extends VMObject {
     type = 'function'
@@ -138,6 +161,13 @@ PROTO_FUNCTION.setProperty('apply', nativeVMFunc((vm, outerInvokable, args) => {
 }))
 
 PROTO_OBJECT.setProperty('toString', nativeVMFunc(() => ({ type: 'string', value: '[object Object]' })));
+
+PROTO_ARRAY.setProperty('push', nativeVMFunc((vm, subject, args) => {
+    assert (subject instanceof VMArray, "`this` must be an array");
+
+    if (typeof args[0] !== 'undefined')
+        subject.arrayElements.push(args[0])
+}));
 
 
 class VMFunction extends VMInvokable {
@@ -1201,6 +1231,9 @@ function createGlobalObject() {
     }));
     G.getOwnProperty('String').setProperty('fromCharCode', nativeVMFunc((vm, subject, args) => {
         const arg = args[0];
+        if (arg === undefined || arg.type === 'undefined')
+            return {type: 'string', value: ''};
+
         if (arg.type !== 'number')
             vm.throwTypeError("String.fromCharCode requires a numeric code point, not " + arg.type);
 
@@ -1211,16 +1244,9 @@ function createGlobalObject() {
 
     G.setProperty('Array', nativeVMFunc((vm, subject, args) => { 
         assert(subject.type === 'object', 'Only supported invoking via new Array()');
-
-        subject.arrayElements = [];
-
-        subject.setProperty('push', nativeVMFunc((vm, subject, args) => {
-            if (typeof args[0] !== 'undefined')
-                subject.arrayElements.push(args[0])
-        }));
-
-        return {type: 'undefined'}
+        return new VMArray();
     }));
+    G.getProperty('Array').setProperty('prototype', PROTO_ARRAY)
 
     G.setProperty('Function', nativeVMFunc((vm, subject, args) => {
         // even when invoked as `new Function(...)`, discard this, return another object

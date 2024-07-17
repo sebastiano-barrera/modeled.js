@@ -1031,7 +1031,7 @@ export class VM {
             const value = node.value;
             const type = typeof value;
 
-            if (type === 'number' || type === 'string' || type === 'boolean') {
+            if (type === 'number' || type === 'string' || type === 'boolean' || type === 'bigint') {
                 assert (typeof value === type);
                 return {type, value};
 

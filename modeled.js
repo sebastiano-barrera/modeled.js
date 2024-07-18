@@ -1176,16 +1176,14 @@ export class VM {
 
         const t = left.type;
         let value;
-        if (t === 'object') 
+        if (left instanceof VMObject) 
             value = (left.value === null && right.value === null) || Object.is(left, right);
         else if (t === 'boolean') value = (left.value === right.value);
         else if (t === 'string') value = (left.value === right.value);
         else if (t === 'number') value = (left.value === right.value);
         else if (t === 'bigint') value = (left.value === right.value);
         else if (t === 'undefined') value = true;
-        else {
-            throw new VMError('unsupported strict equality for ' + t);
-        }
+        else { throw new VMError('invalid value type: ' + t); }
 
         assert (typeof value === 'boolean');
         return { type: 'boolean', value };

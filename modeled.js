@@ -359,13 +359,14 @@ class Scope {
 class VarScope extends Scope {
     constructor() {
         super();
-        this.vars = new Map()
+        this.vars = new Map();
+        this.dontDelete = new Set();
         // true iff this scope is the function's wrapper
         //  - each function has at least 2 nested scopes:
         //     - wrapper: only arguments are defined
         //     - body: this corresponds to the function's body in { }
         // this allows us to allow var to redefine an argument in the function
-        this.isCallWrapper = false
+        this.isCallWrapper = false;
     }
 
     defineVar(kind, name, value) {
@@ -408,8 +409,11 @@ class VarScope extends Scope {
 
     deleteVar(name) {
         // TODO involve parent scopes
+        if (this.dontDelete.has(name)) return false;
         return this.vars.delete(name);
     }
+
+    setDoNotDelete(name) { this.dontDelete.add(name) }
 }
 
 class EnvScope extends Scope {

@@ -853,6 +853,7 @@ export class VM {
 
         if (type === 'boolean') { return value; }
         else if (type === 'string') { return value.length > 0; }
+        else if (type === 'undefined') { return false; }
 
         throw new VMError('not yet implemented: isTruthy: ' + Deno.inspect(value));
     }

@@ -825,8 +825,9 @@ export class VM {
         return value;
     }
 
-    throwTypeError(message) {
-        const excCons = this.globalObj.getProperty('TypeError');
+    throwTypeError(message) { return this.throwError('TypeError', message); }
+    throwError(constructorName, message) {
+        const excCons = this.globalObj.getProperty(constructorName);
         const messageValue = {type: 'string', value: message};
         const exc = this.performNew(excCons, [messageValue]);
         throw new ProgramException(exc, this.synCtx);
@@ -1144,9 +1145,19 @@ export class VM {
             return this.lookupVar(node.name);
         },
 
+        /** @this VM */
         Literal(node) {
             const value = node.value;
             const type = typeof value;
+
+            if (this.currentScope.isStrict) {
+                if (type === 'number') {
+                    if (node.raw.match(/^0\d+/)) {
+                        // octal literals forbidden in strict mode
+                        this.throwError('SyntaxError', 'octal literals are forbidden in strict mode');
+                    }
+                }
+            }
 
             if (type === 'number' || type === 'string' || type === 'boolean' || type === 'bigint') {
                 assert (typeof value === type);
@@ -1285,6 +1296,7 @@ function createGlobalObject() {
     }
 
     createSimpleErrorType('TypeError')
+    createSimpleErrorType('SyntaxError')
     createSimpleErrorType('RangeError')
     createSimpleErrorType('NameError')
 

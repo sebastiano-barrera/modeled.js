@@ -1380,10 +1380,11 @@ function createGlobalObject() {
 
     G.setProperty('RegExp', nativeVMFunc((vm, subject, args) => {
         const arg = args[0]
-        if (arg.value !== 'string') {
+        if (arg.type !== 'string') {
             vm.throwTypeError('RegExp constructor argument must be string');
         }
         subject.innerRE = new RegExp(arg.value)
+        return subject;
     }))
     G.getProperty('RegExp').setProperty('prototype', PROTO_REGEXP)
 

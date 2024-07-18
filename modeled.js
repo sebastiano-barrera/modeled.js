@@ -55,7 +55,7 @@ class VMObject {
         if (descriptor.get) {
             assert(vm instanceof VM, "looking up described value but vm not passed");
             const retVal = vm.performCall(descriptor.get, this, []);
-            assert (typeof retVal.type === 'string');
+            assert(typeof retVal.type === 'string');
             return retVal;
         }
 
@@ -230,22 +230,22 @@ PROTO_ARRAY.setProperty('push', nativeVMFunc((vm, subject, args) => {
 
     if (typeof args[0] !== 'undefined')
         subject.arrayElements.push(args[0])
-    return {type: 'undefined'};
+    return { type: 'undefined' };
 }));
 PROTO_ARRAY.setProperty('join', nativeVMFunc((vm, subject, args) => {
     if (!(subject instanceof VMArray))
         vm.throwTypeError("Array.prototype.join must be called on an Array");
 
-    const sepValue = args[0] || {type: 'string', value: ''};
-    assert (sepValue.type === 'string');
-    assert (typeof sepValue.value === 'string');
-    
+    const sepValue = args[0] || { type: 'string', value: '' };
+    assert(sepValue.type === 'string');
+    assert(typeof sepValue.value === 'string');
+
     const retStr = subject.arrayElements.map(value => {
         const str = vm.coerceToString(value);
-        assert (str.type === 'string');
+        assert(str.type === 'string');
         return str.value;
     }).join(sepValue.value);
-    return {type: 'string', value: retStr};
+    return { type: 'string', value: retStr };
 }));
 
 
@@ -744,7 +744,7 @@ export class VM {
 
                 const func = this.makeFunction(stmt.params, stmt.body);
                 assert(typeof name === 'string');
-                func.setProperty('name', {type: 'string', value: name});
+                func.setProperty('name', { type: 'string', value: name });
                 this.defineVar('var', name, func);
 
                 return func;
@@ -1505,15 +1505,15 @@ function createGlobalObject() {
             return { type: 'undefined' };
 
         if (descriptor.value === undefined)
-            descriptor.value = {type: 'undefined'};
+            descriptor.value = { type: 'undefined' };
 
         const encoded = new VMObject();
         if (descriptor.get !== undefined) encoded.setProperty("get", descriptor.get);
         if (descriptor.set !== undefined) encoded.setProperty("set", descriptor.set);
         encoded.setProperty("value", descriptor.value);
-        encoded.setProperty("writable", {type: 'boolean', value: descriptor.writable});
-        encoded.setProperty("enumerable", {type: 'boolean', value: descriptor.enumerable});
-        encoded.setProperty("configurable", {type: 'boolean', value: descriptor.configurable});
+        encoded.setProperty("writable", { type: 'boolean', value: descriptor.writable });
+        encoded.setProperty("enumerable", { type: 'boolean', value: descriptor.enumerable });
+        encoded.setProperty("configurable", { type: 'boolean', value: descriptor.configurable });
         return encoded;
     }));
     consObject.setProperty('getOwnPropertyNames', nativeVMFunc((vm, subject, args) => {
@@ -1521,9 +1521,9 @@ function createGlobalObject() {
         const obj = vm.coerceToObject(args[0] || { type: 'undefined' });
         const names = obj.getOwnPropertyNames();
         const ret = new VMArray();
-        for (const name of names){
-            assert (typeof name === 'string')
-            ret.arrayElements.push({type: 'string', value: name})
+        for (const name of names) {
+            assert(typeof name === 'string')
+            ret.arrayElements.push({ type: 'string', value: name })
         }
         return ret;
     }));
@@ -1563,7 +1563,7 @@ function createGlobalObject() {
     }));
     G.getProperty('Array').setProperty('isArray', nativeVMFunc((vm, subject, args) => {
         const value = subject instanceof VMArray;
-        return {type: 'boolean', value};
+        return { type: 'boolean', value };
     }));
     G.getProperty('Array').setProperty('prototype', PROTO_ARRAY)
 

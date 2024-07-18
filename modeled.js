@@ -209,11 +209,16 @@ class VMFunction extends VMInvokable {
             vm.currentScope.isCallWrapper = true;
             vm.currentScope.isSetStrict = this.isStrict;
 
+            const argumentsArray = new VMArray()
+
             for (const ndx in this.params) {
                 const name = this.params[ndx];
                 const value = args[ndx] || { type: 'undefined' };
                 vm.defineVar('var', name, value);
+                argumentsArray.arrayElements.push(value);
             }
+
+            vm.defineVar('var', 'arguments', argumentsArray);
 
             return vm.withScope(() => {
                 try { vm.runStmt(this.body) }

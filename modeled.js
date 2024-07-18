@@ -997,6 +997,16 @@ export class VM {
                 value.value = !value.value;
                 return value;
 
+            } else if (expr.operator === '-') {
+                const value = this.evalExpr(expr.argument);
+
+                if (value.type === 'number' || value.type === 'bigint') {
+                    value.value = -value.value;
+                } else {
+                    vm.throwTypeError("unary operator '-' not defined for type " + value.type);
+                }
+                return value;
+
             } else {
                 throw new VMError('unsupported unary op: ' + expr.operator);
             }
@@ -1298,6 +1308,12 @@ function createGlobalObject() {
         return {type: 'undefined'};
     }));
     G.setProperty('Object', consObject);
+
+    G.setProperty('Boolean', nativeVMFunc((vm, subject, args) => { 
+        if (subject.type !== 'undefined')
+            throw new VMError('not yet implemented: new Boolean(...)')
+        return vm.coerceToBoolean(args[0]);
+    }));
 
     G.setProperty('String', nativeVMFunc((vm, subject, args) => { 
         if(subject.type === 'undefined') {

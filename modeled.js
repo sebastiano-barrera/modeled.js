@@ -569,11 +569,20 @@ export class VM {
     }
 
     directEval(text) {
-        const ast = acorn.parse(text, {
+        let ast;
+        try {
+            ast = acorn.parse(text, {
             ecmaVersion: 'latest',
             directSourceFile: new SourceWrapper(text),
             locations: true,
         });
+        } catch (err) {
+            if (err instanceof SyntaxError) {
+                // translate this into a SyntaxError into the running program
+                this.throwError("SyntaxError", err.message);
+            }
+            throw err;
+        }
 
         // force the semantics of a BlockStatement on the AST's root, then run
         // and return the completion value

@@ -90,6 +90,11 @@ async function runTest262Case(test262Root, path) {
     vm.runScript({ path: '<preamble:sta>',    text: preamble.sta });
     vm.runScript({ path: '<preamble:assert>', text: preamble.assert });
 
+    for (const path of metadata.includes) {
+      const text = Deno.readTextFileSync(test262Root + '/harness/' + path);
+      vm.runScript({ path: `<preamble:${path}>`, text });
+    }
+
     const effectiveText = strict ? ('"use strict";' + text) : text;
 
     let outcome;
@@ -139,18 +144,6 @@ function parseArgsChecked(args) {
   } 
 
   return args;
-}
-
-async function readPreamble(test262Root) {
-  let text = ""
-  for (const relPath of [
-    'harness/sta.js',
-    'harness/assert.js',
-  ]) {
-    const path = `${test262Root}/${relPath}`;
-    text += await Deno.readTextFile(path);
-  }
-  return text;
 }
 
 function cutMetadata(text) {

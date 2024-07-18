@@ -808,11 +808,29 @@ export class VM {
 
     doAssignment(targetExpr, value) {
         if (targetExpr.type === "MemberExpression") {
-            const obj = this.evalExpr(targetExpr.object);
-            assert(targetExpr.property.type === 'Identifier', 'unsupported member property: ' + targetExpr.property.type);
-            const propertyName = targetExpr.property.name;
+            assert(!targetExpr.optional, 'unsupported: assignment to MemberExpression with .optional = true');
 
-            obj.setProperty(propertyName, value, this);
+            const obj = this.evalExpr(targetExpr.object);
+
+            let property;
+            if (targetExpr.computed) {
+                property = this.evalExpr(targetExpr.property);
+            } else {
+                assert(targetExpr.property.type === 'Identifier', 'unsupported non-computed member property: ' + targetExpr.property.type);
+                const propertyName = targetExpr.property.name;
+                property = {type: 'string', value: propertyName};
+            }
+            
+            if (property.type === 'string') {
+                obj.setProperty(property.value, value, this);
+
+            } else if (property.type === 'number') {
+                obj.setIndex(property.value, value);
+
+            } else {
+                vm.throwTypeError("object property is neither number nor string, but " + property.type);
+            }
+
 
         } else if (targetExpr.type === "Identifier") {
             const name = targetExpr.name;
@@ -882,8 +900,6 @@ export class VM {
                 throw new VMError('unsupported update assignment op. ' + Deno.inspect(expr));
             }
 
-            assert(!expr.left.computed, 'unsupported: MemberExpression.computed');
-            assert(!expr.left.optional, 'unsupported: MemberExpression.optional');
             return this.doAssignment(expr.left, value);
         },
 

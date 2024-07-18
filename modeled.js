@@ -279,7 +279,50 @@ PROTO_REGEXP.setDescribedProperty('lastIndex', 'set', nativeVMFunc((vm, subject,
     assert (typeof arg.value === 'number');
     subject.innerRE.lastIndex = arg.value;
 }));
+PROTO_REGEXP.setProperty('exec', nativeVMFunc((vm, subject, args) => {
+    assert (
+        subject.innerRE instanceof RegExp,
+        "RegExp.prototype.exec can only be called on RegExp objects"
+    );
 
+    if (args.length === 0 || args[0].type !== 'string')
+        vm.throwTypeError("RegExp.prototype.exec must be called with a single string as argument");
+    
+    const str = args[0].value;
+    assert (typeof str === 'string');
+
+    const nativeRet = subject.innerRE.exec(str);
+    assert (nativeRet instanceof Array);
+
+    const ret = new VMArray();
+    for (const item of nativeRet) {
+        assert (typeof item === 'string');
+        ret.arrayElements.push({type: 'string', value: item});
+    }
+
+    assert (typeof nativeRet.index === 'number');
+    ret.setProperty('index', {type: 'number', value: nativeRet.index});
+
+    assert (typeof nativeRet.input === 'string');
+    ret.setProperty('input', {type: 'string', value: nativeRet.input});
+
+    if (typeof nativeRet.groups !== 'undefined') {
+        assert(typeof nativeRet.groups === 'object');
+        assert(Object.getPrototypeOf(nativeRet.groups) === null);
+        const groups = new VMObject();
+        groups.proto = { type: 'object', value: 'null' };
+        for (const groupName in nativeRet.groups) {
+            const value = nativeRet.groups[groupName];
+            assert(typeof value === 'string');
+            groups.setProperty(groupName, { type: 'string', value });
+        }
+
+        ret.setProperty('groups', groups);
+    }
+
+    // TODO property `indices`
+    return ret;
+}));
 
 class Scope {
     constructor() {

@@ -1113,8 +1113,6 @@ export class VM {
                     if (!(obj instanceof VMObject))
                         this.throwTypeError("can't delete from non-object");
 
-                    console.log('---')
-                    console.log(expr.argument)
                     let property;
                     if (expr.argument.computed) {
                         const nameValue = this.evalExpr(expr.argument.property);
@@ -1334,7 +1332,6 @@ export class VM {
 
             } else if (type === 'object') {
                 if (node.value instanceof RegExp) {
-                    console.log('creating regexp: ', node.value)
                     return createRegExpFromNative(node.value);
 
                 } else if (node.value === null) {

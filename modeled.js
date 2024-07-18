@@ -1194,7 +1194,7 @@ export class VM {
             const value = node.value;
             const type = typeof value;
 
-            if (this.currentScope.isStrict) {
+            if (this.currentScope.isStrict()) {
                 if (type === 'number') {
                     if (node.raw.match(/^0\d+/)) {
                         // octal literals forbidden in strict mode

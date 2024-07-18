@@ -819,6 +819,28 @@ export class VM {
                 return completion;
             });
         },
+
+        ForInStatement(node) {
+            const iteree = this.evalExpr(node.right);
+            this.withScope(() => {
+                this.runStmt(node.left);
+
+                assert(node.left.type === 'VariableDeclaration');
+                assert(node.left.declarations.length === 1);
+                assert(node.left.declarations[0].type === 'VariableDeclarator');
+                assert(node.left.declarations[0].init === null);
+                assert(node.left.declarations[0].id.type === "Identifier");
+                const asmtTarget = node.left.declarations[0].id;
+
+                const properties = iteree.getOwnPropertyNames();
+                for (const name of properties) {
+                    assert(typeof name === 'string');
+                    const value = iteree.getOwnProperty(name);
+                    this.doAssignment(asmtTarget, value);
+                    this.runStmt(node.body);
+                }
+            });
+        }
     }
 
     //

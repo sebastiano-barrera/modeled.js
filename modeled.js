@@ -1406,7 +1406,10 @@ function createRegExpFromNative(innerRE) {
                 vm.throwTypeError("property lastIndex must be set to a number");
             assert(typeof arg.value === 'number');
             subject.innerRE.lastIndex = arg.value;
-        })
+        }),
+        writable: true,
+        enumerable: false,
+        configurable: false,
     });
 
     return obj

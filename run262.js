@@ -90,11 +90,13 @@ async function runTest262Case(test262Root, path) {
     vm.runScript({ path: '<preamble:sta>',    text: preamble.sta });
     vm.runScript({ path: '<preamble:assert>', text: preamble.assert });
 
-    for (const path of metadata.includes) {
-      const text = Deno.readTextFileSync(test262Root + '/harness/' + path);
-      vm.runScript({ path: `<preamble:${path}>`, text });
+    if (metadata.includes) {
+      for (const path of metadata.includes) {
+        const text = Deno.readTextFileSync(test262Root + '/harness/' + path);
+        vm.runScript({ path: `<preamble:${path}>`, text });
+      }
     }
-
+    
     const effectiveText = strict ? ('"use strict";' + text) : text;
 
     let outcome;

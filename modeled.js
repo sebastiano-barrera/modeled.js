@@ -411,7 +411,7 @@ class VarScope extends Scope {
         const value = this.vars.get(name);
         if (typeof value !== 'undefined') return value;
         if (this.parent) return this.parent.lookupVar(name);
-        throw new VMError('unbound variable: ' + name);
+        return undefined;
     }
 
     deleteVar(name) {
@@ -445,10 +445,8 @@ class EnvScope extends Scope {
     }
 
     lookupVar(name) {
-        // TODO! only the innermost scope is used
-        const value = this.env.getProperty(name);
-        if (value) return value;
-        throw new VMError('unbound variable: ' + name);
+        if (!this.env.hasOwnProperty(name)) { return undefined; }
+        return this.env.getProperty(name);
     }
 
     deleteVar(name) {
@@ -1186,7 +1184,13 @@ export class VM {
         },
 
         Identifier(node) {
-            return this.lookupVar(node.name);
+            if (node.name === 'undefined') return {type: "undefined"};
+
+            const value = this.lookupVar(node.name);
+            if (value === undefined)
+                this.throwError('ReferenceError', 'unbound variable: ' + node.name);
+
+            return value;
         },
 
         /** @this VM */
@@ -1343,6 +1347,7 @@ function createGlobalObject() {
 
     createSimpleErrorType('TypeError')
     createSimpleErrorType('SyntaxError')
+    createSimpleErrorType('ReferenceError')
     createSimpleErrorType('RangeError')
     createSimpleErrorType('NameError')
 

@@ -108,6 +108,11 @@ class VMObject {
         assert (newProto === null || newProto instanceof VMObject, "VMObject's prototype must be VMObject or null");
         this._proto = newProto;
     }
+
+    is(other) {
+        // we reuse the host JS VM logic for now
+        return Object.is(this, other);
+    }
 }
 
 class VMArray extends VMObject {
@@ -572,10 +577,10 @@ export class VM {
         let ast;
         try {
             ast = acorn.parse(text, {
-            ecmaVersion: 'latest',
-            directSourceFile: new SourceWrapper(text),
-            locations: true,
-        });
+                ecmaVersion: 'latest',
+                directSourceFile: new SourceWrapper(text),
+                locations: true,
+            });
         } catch (err) {
             if (err instanceof SyntaxError) {
                 // translate this into a SyntaxError into the running program
@@ -1086,7 +1091,19 @@ export class VM {
             else if (expr.operator === '-')  { return numericOp((a, b) => (a - b)); }
             else if (expr.operator === '*')  { return numericOp((a, b) => (a * b)); }
             else if (expr.operator === '/')  { return numericOp((a, b) => (a / b)); }
-            else { throw new VMError('unsupported binary op: ' + expr.operator); }
+            else if (expr.operator === 'instanceof') {
+                const constructor = this.evalExpr(expr.right);
+                let obj = this.evalExpr(expr.left);
+                for (; obj !== null; obj = obj.proto) {
+                    const check = obj.getProperty('constructor');
+                    if (!check instanceof VMObject) continue;
+                    if (check.is(constructor))
+                        return {type: 'boolean', value: true};
+                }
+
+                return {type: 'boolean', value: false};
+
+            } else { throw new VMError('unsupported binary op: ' + expr.operator); }
         },
 
         LogicalExpression(expr) {

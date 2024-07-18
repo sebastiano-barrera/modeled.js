@@ -298,6 +298,8 @@ PROTO_REGEXP.setProperty('exec', nativeVMFunc((vm, subject, args) => {
     assert (typeof str === 'string');
 
     const nativeRet = subject.innerRE.exec(str);
+    if (nativeRet === null)
+        return {type: "object", value: null};
     assert (nativeRet instanceof Array);
 
     const ret = new VMArray();
@@ -1229,8 +1231,10 @@ export class VM {
 
         const t = left.type;
         let value;
-        if (left instanceof VMObject) 
-            value = (left.value === null && right.value === null) || Object.is(left, right);
+        if (left.type === 'object' && left.value === null)
+            value = (right.type === 'object' && right.value === null);
+        else if (left instanceof VMObject)
+            value = Object.is(left, right);
         else if (t === 'boolean') value = (left.value === right.value);
         else if (t === 'string') value = (left.value === right.value);
         else if (t === 'number') value = (left.value === right.value);
@@ -1422,9 +1426,13 @@ function createGlobalObject() {
 
     G.setProperty('RegExp', nativeVMFunc((vm, subject, args) => {
         const arg = args[0]
-        if (arg.type !== 'string') {
+        if (arg.type !== 'string')
             vm.throwTypeError('RegExp constructor argument must be string');
+    
+        if (subject.type === 'undefined'){
+            subject = new VMObject(PROTO_REGEXP);
         }
+
         subject.innerRE = new RegExp(arg.value)
         return subject;
     }))

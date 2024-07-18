@@ -121,6 +121,12 @@ class VMArray extends VMObject {
         this.arrayElements = []
     }
 
+    getOwnProperty(name, vm = undefined) {
+        if (name === 'length')
+            return {type: 'number', value: this.arrayElements.length};
+        return super.getOwnProperty(name, vm);
+    }
+
     getIndex(index) {
         return typeof index === 'number'
             ? this.arrayElements[index]

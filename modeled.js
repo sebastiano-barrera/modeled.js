@@ -44,10 +44,13 @@ class VMObject {
         this._proto = proto
     }
 
+    getOwnPropertyDescriptor(name) {
+        return this.descriptors.get(name);
+    }
     getOwnProperty(name, vm = undefined) {
         assert(typeof name === 'string');
 
-        const descriptor = this.descriptors.get(name)
+        const descriptor = this.getOwnPropertyDescriptor(name);
         if (descriptor === undefined) return { type: 'undefined' };
 
         if (descriptor.get) {
@@ -57,7 +60,10 @@ class VMObject {
 
         return descriptor.value;
     }
-    hasOwnProperty(name) { return this.descriptors.has(name); }
+    hasOwnProperty(name) {
+        assert(typeof name === 'string');
+        return this.descriptors.has(name);
+    }
     getProperty(name, vm = undefined) {
         assert(typeof name === 'string');
 
@@ -103,7 +109,7 @@ class VMObject {
     defineProperty(name, descriptor) {
         assert(typeof name === 'string');
         // descriptorValue is a VM value
-        assert (typeof descriptor === 'object', 'VM bug: descriptor is not an object')
+        assert(typeof descriptor === 'object', 'VM bug: descriptor is not an object')
 
         if (descriptor.get || descriptor.set) {
             assert(
@@ -116,10 +122,10 @@ class VMObject {
             );
         }
 
-        if (descriptor.writable === undefined) descriptor.writable = true;
-        if (descriptor.configurable === undefined) descriptor.configurable = true;
-        assert (typeof descriptor.writable === 'boolean', 'invalid descriptor: `writable` is not a boolean');
-        assert (typeof descriptor.configurable === 'boolean', 'invalid descriptor: `configurable` is not a boolean');
+        for (const key of ['writable', 'configurable', 'enumerable']) {
+            if (descriptor[key] === undefined) descriptor[key] = true;
+            assert(typeof descriptor[key] === 'boolean', `invalid descriptor: .${key} is not a boolean`);
+        }
 
         // TODO Propertly honor writable, configurable
 
@@ -205,6 +211,17 @@ PROTO_FUNCTION.setProperty('apply', nativeVMFunc((vm, outerInvokable, args) => {
 }))
 
 PROTO_OBJECT.setProperty('toString', nativeVMFunc(() => ({ type: 'string', value: '[object Object]' })));
+PROTO_OBJECT.setProperty('hasOwnProperty', nativeVMFunc((vm, subject, args) => {
+    subject = vm.coerceToObject(subject);
+    const name = vm.coerceToString(args[0] || { type: 'undefined' });
+    assert(name.type === 'string');
+    console.log(' --- checking');
+    console.log('  property =', name);
+    console.log('  this =', subject);
+    const ret = subject.hasOwnProperty(name.value);
+    assert(typeof ret === 'boolean');
+    return { type: 'boolean', value: ret };
+}));
 
 PROTO_ARRAY.setProperty('push', nativeVMFunc((vm, subject, args) => {
     assert(subject instanceof VMArray, "`this` must be an array");
@@ -312,19 +329,6 @@ PROTO_REGEXP.setProperty('test', nativeVMFunc((vm, subject, args) => {
     assert(typeof ret === 'boolean')
     return { type: 'boolean', value: ret }
 }));
-PROTO_REGEXP.defineProperty('lastIndex', {
-    set: nativeVMFunc((vm, subject, args) => {
-        assert(
-            subject.innerRE instanceof RegExp,
-            "RegExp.prototype.lastIndex setter can only be called on RegExp objects"
-        );
-        const arg = args[0] || { type: 'undefined' };
-        if (arg.type !== 'number')
-            vm.throwTypeError("property lastIndex must be set to a number");
-        assert(typeof arg.value === 'number');
-        subject.innerRE.lastIndex = arg.value;
-    })
-});
 PROTO_REGEXP.setProperty('exec', nativeVMFunc((vm, subject, args) => {
     assert(
         subject.innerRE instanceof RegExp,
@@ -1359,6 +1363,22 @@ function createRegExpFromNative(innerRE) {
     const obj = new VMObject(PROTO_REGEXP)
     obj.innerRE = innerRE
     obj.setProperty('source', { type: 'string', value: innerRE.source });
+
+    // lastIndex must be an own property (there is a dedicated test262 case)
+    obj.defineProperty('lastIndex', {
+        set: nativeVMFunc((vm, subject, args) => {
+            assert(
+                subject.innerRE instanceof RegExp,
+                "RegExp.prototype.lastIndex setter can only be called on RegExp objects"
+            );
+            const arg = args[0] || { type: 'undefined' };
+            if (arg.type !== 'number')
+                vm.throwTypeError("property lastIndex must be set to a number");
+            assert(typeof arg.value === 'number');
+            subject.innerRE.lastIndex = arg.value;
+        })
+    });
+
     return obj
 }
 
@@ -1440,6 +1460,25 @@ function createGlobalObject() {
         });
         return { type: 'undefined' };
     }));
+    consObject.setProperty('getOwnPropertyDescriptor', nativeVMFunc((vm, subject, args) => {
+        /** @type VMObject */
+        const obj = vm.coerceToObject(args[0] || { type: 'undefined' });
+        const name = args[1];
+        if (name === undefined || name.type === 'undefined')
+            return { type: 'undefined' };
+
+        const descriptor = obj.getOwnPropertyDescriptor(name.value);
+        if (descriptor === undefined)
+            return { type: 'undefined' };
+
+        const encoded = new VMObject();
+        encoded.setProperty("get", descriptor.get);
+        encoded.setProperty("set", descriptor.set);
+        encoded.setProperty("value", descriptor.value);
+        encoded.setProperty("writable", descriptor.writable);
+        encoded.setProperty("configurable", descriptor.configurable);
+        return encoded;
+    }));
     G.setProperty('Object', consObject);
 
     G.setProperty('Boolean', nativeVMFunc((vm, subject, args) => {
@@ -1499,13 +1538,7 @@ function createGlobalObject() {
         const arg = args[0]
         if (arg.type !== 'string')
             vm.throwTypeError('RegExp constructor argument must be string');
-
-        if (subject.type === 'undefined') {
-            subject = new VMObject(PROTO_REGEXP);
-        }
-
-        subject.innerRE = new RegExp(arg.value)
-        return subject;
+        return createRegExpFromNative(new RegExp(arg.value))
     }))
     G.getProperty('RegExp').setProperty('prototype', PROTO_REGEXP)
 

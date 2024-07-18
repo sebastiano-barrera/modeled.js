@@ -232,6 +232,21 @@ PROTO_ARRAY.setProperty('push', nativeVMFunc((vm, subject, args) => {
         subject.arrayElements.push(args[0])
     return {type: 'undefined'};
 }));
+PROTO_ARRAY.setProperty('join', nativeVMFunc((vm, subject, args) => {
+    if (!(subject instanceof VMArray))
+        vm.throwTypeError("Array.prototype.join must be called on an Array");
+
+    const sepValue = args[0] || {type: 'string', value: ''};
+    assert (sepValue.type === 'string');
+    assert (typeof sepValue.value === 'string');
+    
+    const retStr = subject.arrayElements.map(value => {
+        const str = vm.coerceToString(value);
+        assert (str.type === 'string');
+        return str.value;
+    }).join(sepValue.value);
+    return {type: 'string', value: retStr};
+}));
 
 
 class VMFunction extends VMInvokable {

@@ -72,7 +72,12 @@ class VMObject {
     setProperty(name, value, vm = undefined) {
         assert (typeof name === 'string');
         
-        const descriptor = this.describedProperties.get(name)
+        let descriptor;
+        for (let obj=this; obj; obj = obj.proto) {
+            descriptor = obj.describedProperties.get(name);
+            if (descriptor) break;
+        }
+
         if (descriptor) {
             const setter = descriptor.set;
             assert (vm instanceof VM, "looking up described value but vm not passed");
@@ -129,6 +134,7 @@ const PROTO_NUMBER = new VMObject()
 const PROTO_BOOLEAN = new VMObject()
 const PROTO_STRING = new VMObject()
 const PROTO_ARRAY = new VMObject()
+const PROTO_REGEXP = new VMObject();
 
 class VMInvokable extends VMObject {
     type = 'function'
@@ -251,6 +257,28 @@ PROTO_NUMBER.setProperty('toString', nativeVMFunc((vm, subject, args) => {
     assert (typeof subject.value === 'number');
     return Number.prototype.toString.call(subject.value);
 }))
+
+PROTO_REGEXP.setProperty('test', nativeVMFunc((vm, subject, args) => {
+    const arg = args[0]
+    if (arg.type !== 'string') {
+        vm.throwTypeError('RegExp.test argument must be string')
+    }
+
+    const ret = subject.innerRE.test(arg.value)
+    assert (typeof ret === 'boolean')
+    return {type: 'boolean', value: ret}
+}));
+PROTO_REGEXP.setDescribedProperty('lastIndex', 'set', nativeVMFunc((vm, subject, args) => {
+    assert (
+        subject.innerRE instanceof RegExp,
+        "RegExp.prototype.lastIndex setter can only be called on RegExp objects"
+    );
+    const arg = args[0] || {type: 'undefined'};
+    if (arg.type !== 'number') 
+        vm.throwTypeError("property lastIndex must be set to a number");
+    assert (typeof arg.value === 'number');
+    subject.innerRE.lastIndex = arg.value;
+}));
 
 
 class Scope {
@@ -1067,8 +1095,8 @@ export class VM {
 
             } else if(type === 'object') {
                 if (node.value instanceof RegExp) {
-                    const regexp_cons = this.globalObj.getProperty('RegExp')
-                    return regexp_cons._fromNativeRegExp(node.value);
+                    console.log('creating regexp: ', node.value)
+                    return createRegExpFromNative(node.value);
 
                 } else if (node.value === null) {
                     return {type: 'object', value: null};
@@ -1166,6 +1194,14 @@ function nativeVMFunc(innerImpl) {
         // in innerImpl, `this` is the VMInvokable object
         invoke = innerImpl
     }
+}
+
+function createRegExpFromNative(innerRE) {
+    assert (innerRE instanceof RegExp);
+    const obj = new VMObject(PROTO_REGEXP)
+    obj.innerRE = innerRE
+    obj.setProperty('source', {type: 'string', value: innerRE.source});
+    return obj
 }
 
 function createGlobalObject() {
@@ -1267,42 +1303,14 @@ function createGlobalObject() {
     }));
     G.getProperty('Function').setProperty('prototype', PROTO_FUNCTION);
 
-    const regexp_proto = new VMObject();
-    regexp_proto.setProperty('test', nativeVMFunc((vm, subject, args) => {
+    G.setProperty('RegExp', nativeVMFunc((vm, subject, args) => {
         const arg = args[0]
-        if (arg.type !== 'string') {
-            vm.throwTypeError('RegExp.test argument must be string')
+        if (arg.value !== 'string') {
+            vm.throwTypeError('RegExp constructor argument must be string');
         }
-
-        const ret = subject.innerRE.test(arg.value)
-        assert (typeof ret === 'boolean')
-        return {type: 'boolean', value: ret}
-    }));
-
-    G.setProperty('RegExp', new class extends VMInvokable {
-        constructor() {
-            super(regexp_proto);
-        }
-
-        _fromNativeRegExp(innerRE) {
-            assert (innerRE instanceof RegExp);
-            const obj = new VMObject()
-            obj.innerRE = innerRE
-            obj.proto = regexp_proto
-            obj.setProperty('constructor', this)
-            obj.setProperty('source', {type: 'string', value: innerRE.source})
-            return obj
-        }
-
-        invoke(vm, subject, args) {
-            const arg = args[0]
-            if (arg.value !== 'string') {
-                vm.throwTypeError('RegExp constructor argument must be string');
-            }
-
-            subject.innerRE = new RegExp(arg.value)
-        }
-    })
+        subject.innerRE = new RegExp(arg.value)
+    }))
+    G.getProperty('RegExp').setProperty('prototype', PROTO_REGEXP)
 
     G.setProperty('eval', nativeVMFunc((vm, subject, args) => {
         // this function is only looked up for indirect eval; direct eval has a

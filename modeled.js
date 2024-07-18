@@ -44,6 +44,15 @@ class VMObject {
         this._proto = proto
     }
 
+    resolveDescriptor(descriptor, vm) {
+        if (descriptor.get) {
+            assert(vm instanceof VM, "looking up described value but vm not passed");
+            const retVal = vm.performCall(descriptor.get, this, []);
+            assert(typeof retVal.type === 'string');
+            return retVal;
+        }
+        return descriptor.value;
+    }
     getOwnPropertyDescriptor(name) { return this.descriptors.get(name); }
     getOwnPropertyNames() { return this.descriptors.keys() }
     getOwnProperty(name, vm = undefined) {
@@ -52,14 +61,7 @@ class VMObject {
         const descriptor = this.getOwnPropertyDescriptor(name);
         if (descriptor === undefined) return { type: 'undefined' };
 
-        if (descriptor.get) {
-            assert(vm instanceof VM, "looking up described value but vm not passed");
-            const retVal = vm.performCall(descriptor.get, this, []);
-            assert(typeof retVal.type === 'string');
-            return retVal;
-        }
-
-        return descriptor.value;
+        return this.resolveDescriptor(descriptor, vm);
     }
     hasOwnProperty(name) {
         assert(typeof name === 'string');
@@ -133,7 +135,10 @@ class VMObject {
 
         this.descriptors.set(name, descriptor);
     }
-    deleteProperty(name) { return this.properties.delete(name) }
+    deleteProperty(name) {
+        assert(typeof name === 'string');
+        return this.descriptors.delete(name);
+    }
 
     getIndex(index) { return this.getOwnProperty(String(index)); }
     setIndex(index, value) { return this.setProperty(String(index), value); }
@@ -217,9 +222,6 @@ PROTO_OBJECT.setProperty('hasOwnProperty', nativeVMFunc((vm, subject, args) => {
     subject = vm.coerceToObject(subject);
     const name = vm.coerceToString(args[0] || { type: 'undefined' });
     assert(name.type === 'string');
-    console.log(' --- checking');
-    console.log('  property =', name);
-    console.log('  this =', subject);
     const ret = subject.hasOwnProperty(name.value);
     assert(typeof ret === 'boolean');
     return { type: 'boolean', value: ret };
@@ -937,7 +939,7 @@ export class VM {
             this.setVar(name, value);
 
         } else {
-            throw new VMError('unsupported assignment target: ' + Deno.inspect(stmt.id));
+            throw new VMError('unsupported assignment target: ' + Deno.inspect(targetExpr));
         }
 
         return value;
@@ -1102,11 +1104,34 @@ export class VM {
         UnaryExpression(expr) {
             if (expr.operator === 'delete') {
                 assert(expr.prefix, 'parser bug: delete must be prefix');
-                assert(expr.argument.type === 'Identifier', 'only supported: delete <Identifier>');
+                if (expr.argument.type === 'Identifier') {
+                    const name = expr.argument.name;
+                    const didDelete = this.deleteVar(name);
+                    return { type: 'boolean', value: didDelete };
+                } else if (expr.argument.type === 'MemberExpression') {
+                    const obj = this.evalExpr(expr.argument.object);
+                    if (!(obj instanceof VMObject))
+                        this.throwTypeError("can't delete from non-object");
 
-                const name = expr.argument.name;
-                const didDelete = this.deleteVar(name);
-                return { type: 'boolean', value: didDelete };
+                    console.log('---')
+                    console.log(expr.argument)
+                    let property;
+                    if (expr.argument.computed) {
+                        const nameValue = this.evalExpr(expr.argument.property);
+                        if (nameValue.type !== 'string') {
+                            vm.throwTypeError("property type is not string");
+                        }
+                        property = nameValue.value;
+                    } else {
+                        property = expr.argument.property.name;
+                    }
+
+                    const ret = obj.deleteProperty(property);
+                    return { type: 'boolean', value: ret };
+                } else {
+                    throw new VMError('unsupported delete argument: ' + Deno.inspect(expr));
+                }
+
 
             } else if (expr.operator === 'typeof') {
                 const value = this.evalExpr(expr.argument);
@@ -1532,7 +1557,7 @@ function createGlobalObject() {
         const encoded = new VMObject();
         if (descriptor.get !== undefined) encoded.setProperty("get", descriptor.get);
         if (descriptor.set !== undefined) encoded.setProperty("set", descriptor.set);
-        encoded.setProperty("value", descriptor.value);
+        encoded.setProperty("value", obj.resolveDescriptor(descriptor));
         encoded.setProperty("writable", { type: 'boolean', value: descriptor.writable });
         encoded.setProperty("enumerable", { type: 'boolean', value: descriptor.enumerable });
         encoded.setProperty("configurable", { type: 'boolean', value: descriptor.configurable });

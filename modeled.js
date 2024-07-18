@@ -184,6 +184,7 @@ class VMFunction extends VMInvokable {
         this.params = params;
         this.body = body;
         this.parentScope = null;
+        this.name = null;
     }
     
     get isStrict() { return this.#isStrict; }
@@ -662,6 +663,7 @@ export class VM {
                 assert(!stmt.async,      "unsupported func decl type: async");
                 
                 const func = this.makeFunction(stmt.params, stmt.body);
+                func.setProperty('name', name);
                 this.defineVar('var', name, func);
 
                 return func;
@@ -1417,6 +1419,13 @@ function createGlobalObject() {
         }
         return {type: 'undefined'}
     }));
+
+    for (const name in G.properties) {
+        const value = G.properties[name];
+        if (value instanceof VMFunction) {
+            value.name = name;
+        }
+    }
 
     return G;
 }

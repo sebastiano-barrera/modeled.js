@@ -1170,6 +1170,16 @@ export class VM {
             }
         },
 
+        ConditionalExpression(expr) {
+            const testValue = this.evalExpr(expr.test);
+            const test = this.coerceToBoolean(testValue);
+            assert(test.type === 'boolean');
+            // don't even eval the non-taken branch
+            if (test.value === true) { return this.evalExpr(expr.consequent); }
+            else if (test.value === false) { return this.evalExpr(expr.alternate); }
+            else throw new VMError('bug in coerceToBoolean; returned non-boolean');
+        },
+
         NewExpression(expr) {
             const constructor = this.evalExpr(expr.callee);
             const args = expr.arguments.map(argNode => this.evalExpr(argNode));

@@ -1223,7 +1223,7 @@ export class VM {
                 callThis = { type: "undefined" };
                 callee = this.evalExpr(expr.callee);
                 if (callee.type === 'undefined' || callee.type === 'null') {
-                    throw new VMError(`can't invoke undefined/null: ${Deno.inspect(expr.callee)}`);
+                    throw new VMError("can't invoke undefined/null");
                 }
             }
 
@@ -1541,6 +1541,10 @@ function createGlobalObject() {
     G.setProperty('Array', nativeVMFunc((vm, subject, args) => {
         assert(subject.type === 'object', 'Only supported invoking via new Array()');
         return new VMArray();
+    }));
+    G.getProperty('Array').setProperty('isArray', nativeVMFunc((vm, subject, args) => {
+        const value = subject instanceof VMArray;
+        return {type: 'boolean', value};
     }));
     G.getProperty('Array').setProperty('prototype', PROTO_ARRAY)
 

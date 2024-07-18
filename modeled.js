@@ -44,9 +44,8 @@ class VMObject {
         this._proto = proto
     }
 
-    getOwnPropertyDescriptor(name) {
-        return this.descriptors.get(name);
-    }
+    getOwnPropertyDescriptor(name) { return this.descriptors.get(name); }
+    getOwnPropertyNames() { return this.descriptors.keys() }
     getOwnProperty(name, vm = undefined) {
         assert(typeof name === 'string');
 
@@ -55,7 +54,9 @@ class VMObject {
 
         if (descriptor.get) {
             assert(vm instanceof VM, "looking up described value but vm not passed");
-            return vm.performCall(descriptor.get, this, []);
+            const retVal = vm.performCall(descriptor.get, this, []);
+            assert (typeof retVal.type === 'string');
+            return retVal;
         }
 
         return descriptor.value;
@@ -80,6 +81,7 @@ class VMObject {
     }
     setProperty(name, value, vm) {
         assert(typeof name === 'string');
+        assert(typeof value.type === 'string');
 
         let descriptor;
         for (let obj = this; obj; obj = obj.proto) {
@@ -228,6 +230,7 @@ PROTO_ARRAY.setProperty('push', nativeVMFunc((vm, subject, args) => {
 
     if (typeof args[0] !== 'undefined')
         subject.arrayElements.push(args[0])
+    return {type: 'undefined'};
 }));
 
 
@@ -725,7 +728,8 @@ export class VM {
                 assert(!stmt.async, "unsupported func decl type: async");
 
                 const func = this.makeFunction(stmt.params, stmt.body);
-                func.setProperty('name', name);
+                assert(typeof name === 'string');
+                func.setProperty('name', {type: 'string', value: name});
                 this.defineVar('var', name, func);
 
                 return func;
@@ -1471,13 +1475,28 @@ function createGlobalObject() {
         if (descriptor === undefined)
             return { type: 'undefined' };
 
+        if (descriptor.value === undefined)
+            descriptor.value = {type: 'undefined'};
+
         const encoded = new VMObject();
-        encoded.setProperty("get", descriptor.get);
-        encoded.setProperty("set", descriptor.set);
+        if (descriptor.get !== undefined) encoded.setProperty("get", descriptor.get);
+        if (descriptor.set !== undefined) encoded.setProperty("set", descriptor.set);
         encoded.setProperty("value", descriptor.value);
-        encoded.setProperty("writable", descriptor.writable);
-        encoded.setProperty("configurable", descriptor.configurable);
+        encoded.setProperty("writable", {type: 'boolean', value: descriptor.writable});
+        encoded.setProperty("enumerable", {type: 'boolean', value: descriptor.enumerable});
+        encoded.setProperty("configurable", {type: 'boolean', value: descriptor.configurable});
         return encoded;
+    }));
+    consObject.setProperty('getOwnPropertyNames', nativeVMFunc((vm, subject, args) => {
+        /** @type VMObject */
+        const obj = vm.coerceToObject(args[0] || { type: 'undefined' });
+        const names = obj.getOwnPropertyNames();
+        const ret = new VMArray();
+        for (const name of names){
+            assert (typeof name === 'string')
+            ret.arrayElements.push({type: 'string', value: name})
+        }
+        return ret;
     }));
     G.setProperty('Object', consObject);
 

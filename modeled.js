@@ -224,8 +224,8 @@ PROTO_OBJECT.setProperty('toString', nativeVMFunc(() => ({ type: 'string', value
 PROTO_OBJECT.setProperty('hasOwnProperty', nativeVMFunc((vm, subject, args) => {
     subject = vm.coerceToObject(subject);
     const name = vm.coerceToString(args[0] || { type: 'undefined' });
-    assert(name.type === 'string');
-    const ret = subject.hasOwnProperty(name.value);
+    assert(typeof name === 'string');
+    const ret = subject.hasOwnProperty(name);
     assert(typeof ret === 'boolean');
     return { type: 'boolean', value: ret };
 }));
@@ -246,9 +246,7 @@ PROTO_ARRAY.setProperty('join', nativeVMFunc((vm, subject, args) => {
     assert(typeof sepValue.value === 'string');
 
     const retStr = subject.arrayElements.map(value => {
-        const str = vm.coerceToString(value);
-        assert(str.type === 'string');
-        return str.value;
+        return vm.coerceToString(value);
     }).join(sepValue.value);
     return { type: 'string', value: retStr };
 }));
@@ -959,16 +957,12 @@ export class VM {
     coerceToObject(value) {
         if (value instanceof VMObject && value.value !== null) return value;
 
-        const proto = {
-            number: PROTO_NUMBER,
-            boolean: PROTO_BOOLEAN,
-            string: PROTO_STRING,
+        const cons = {
+            number: this.globalObj.getProperty('Number'),
+            boolean: this.globalObj.getProperty('Boolean'),
+            string: this.globalObj.getProperty('String'),
         }[value.type];
-        if (proto) {
-            const obj = new VMObject(proto);
-            obj.primitive = value.value;
-            return obj;
-        }
+        if (cons) return this.performNew(cons, [value]);
 
         this.throwTypeError("can't convert value to object: " + Deno.inspect(value));
     }
@@ -990,7 +984,8 @@ export class VM {
             this.throwTypeError("can't convert value to boolean: " + Deno.inspect(value));
         }
 
-        return { type: 'boolean', value: ret };
+        assert (typeof ret === 'boolean');
+        return ret;
     }
 
     exprs = {
@@ -1120,7 +1115,7 @@ export class VM {
                     if (expr.argument.computed) {
                         const nameValue = this.evalExpr(expr.argument.property);
                         if (nameValue.type !== 'string') {
-                            vm.throwTypeError("property type is not string");
+                            this.throwTypeError("property type is not string");
                         }
                         property = nameValue.value;
                     } else {
@@ -1141,20 +1136,13 @@ export class VM {
             } else if (expr.operator === '!') {
                 assert(expr.prefix === true, "only supported: expr.prefix === true");
                 const value = this.coerceToBoolean(this.evalExpr(expr.argument));
-                assert(value.type === 'boolean');
-                assert(typeof value.value === 'boolean');
-                value.value = !value.value;
-                return value;
+                assert(typeof value === 'boolean');
+                return {type: 'boolean', value: !value};
 
             } else if (expr.operator === '-') {
-                const value = this.evalExpr(expr.argument);
-
-                if (value.type === 'number' || value.type === 'bigint') {
-                    value.value = -value.value;
-                } else {
-                    vm.throwTypeError("unary operator '-' not defined for type " + value.type);
-                }
-                return value;
+                const value = this.coerceToNumber(this.evalExpr(expr.argument));
+                assert(typeof value === 'number' || typeof value === 'bigint');
+                return {type: typeof value, value: -value};
 
             } else {
                 throw new VMError('unsupported unary op: ' + expr.operator);
@@ -1199,9 +1187,9 @@ export class VM {
                 } else {
                     const as = this.coerceToString(a);
                     const bs = this.coerceToString(b);
-                    assert(as.type === 'string', 'coerceToString bug (a)');
-                    assert(bs.type === 'string', 'coerceToString bug (b)');
-                    return { type: 'string', value: as.value + bs.value };
+                    assert(typeof as === 'string', 'coerceToString bug (a)');
+                    assert(typeof bs === 'string', 'coerceToString bug (b)');
+                    return { type: 'string', value: as + bs };
                 }
             }
             else if (expr.operator === '<') { return numericOp((a, b) => (a < b)); }
@@ -1552,7 +1540,7 @@ export class VM {
 
     coerceToString(value) {
         if (value.type === 'object') {
-            if (value.value === null) return { type: 'undefined', value: 'null' };
+            if (value.value === null) return 'null';
 
             // Objects are first converted to a primitive by calling its [Symbol.toPrimitive]() (with "string" as hint), toString(), and valueOf() methods, in that order. The resulting primitive is then converted to a string.
             const prim = this.coerceToPrimitive(value, 'toString first');
@@ -1575,7 +1563,7 @@ export class VM {
         else throw new VMError('invalid value type: ' + value.type);
 
         assert(typeof str === 'string');
-        return { type: 'string', value: str };
+        return str;
     }
 }
 
@@ -1735,21 +1723,31 @@ function createGlobalObject() {
     }));
     G.setProperty('Object', consObject);
 
-    G.setProperty('Boolean', nativeVMFunc((vm, subject, args) => {
-        if (subject.type !== 'undefined')
-            throw new VMError('not yet implemented: new Boolean(...)')
-        return vm.coerceToBoolean(args[0]);
-    }));
-
-    G.setProperty('String', nativeVMFunc((vm, subject, args) => {
-        if (subject.type === 'undefined') {
-            // invoked as function, not via new
-            return vm.coerceToString(args[0])
-        } else {
-            // invoked via new
-            throw new VMError('not yet implemented: new String(...)')
+    function wrapPrimitive(subject, value, coercer, primType, prototype) {
+        const prim = coercer(value);
+        assert(typeof(prim) === primType, `coercer returned <${typeof prim}>, expected <${primType}>`);
+        if (subject instanceof VMObject) {
+            subject = new VMObject(prototype);
+            subject.primitive = prim;
+            return subject;
         }
-    }));
+        return {type: primType, value: prim};
+    }
+
+    G.setProperty('Boolean', nativeVMFunc(
+        (vm, subject, args) => wrapPrimitive(subject, args[0], vm.coerceToBoolean, 'boolean', PROTO_BOOLEAN)
+    ));
+
+    G.setProperty('Number', nativeVMFunc(
+        (vm, subject, args) => wrapPrimitive(subject, args[0], vm.coerceToNumber, 'number', PROTO_NUMBER)
+    ));
+    G.getProperty('Number').setProperty('POSITIVE_INFINITY', {type: 'number', value: Infinity});
+    G.getProperty('Number').setProperty('NEGATIVE_INFINITY', {type: 'number', value: -Infinity});
+    G.getProperty('Number').setProperty('NaN', {type: 'number', value: NaN});
+
+    G.setProperty('String', nativeVMFunc(
+        (vm, subject, args) => wrapPrimitive(subject, args[0], vm.coerceToString, 'string', PROTO_STRING)
+    ));
     G.getOwnProperty('String').setProperty('fromCharCode', nativeVMFunc((vm, subject, args) => {
         const arg = args[0];
         if (arg === undefined || arg.type === 'undefined')

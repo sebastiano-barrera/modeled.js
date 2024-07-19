@@ -220,6 +220,14 @@ PROTO_FUNCTION.setProperty('apply', nativeVMFunc((vm, outerInvokable, args) => {
     // force subject to be this inner subject passed here
     return outerInvokable.invoke(vm, forcedSubject, argsArray)
 }))
+PROTO_FUNCTION.setProperty('toString', nativeVMFunc((vm, subject, args) => {
+    assert (
+        subject instanceof VMFunction,
+        "Function.prototype.toString can only be called on a Function"
+    );
+    const value = `Function#${subject.functionID}`;
+    return {type: 'string', value};
+}))
 
 PROTO_OBJECT.setProperty('toString', nativeVMFunc(() => ({ type: 'string', value: '[object Object]' })));
 PROTO_OBJECT.setProperty('hasOwnProperty', nativeVMFunc((vm, subject, args) => {
@@ -256,12 +264,15 @@ PROTO_ARRAY.setProperty('join', nativeVMFunc((vm, subject, args) => {
 class VMFunction extends VMInvokable {
     #isStrict = false;
 
+    static #lastID = 0;
+
     constructor(params, body) {
         super();
         this.params = params;
         this.body = body;
         this.parentScope = null;
         this.name = null;
+        this.functionID = ++VMFunction.#lastID;
     }
 
     get isStrict() { return this.#isStrict; }
@@ -1163,15 +1174,29 @@ export class VM {
         },
 
         BinaryExpression(expr) {
-            const numericOp = (impl) => {
+            const numberOrStringOp = (implNumeric, implString) => {
                 const a = this.evalExpr(expr.left);
                 const b = this.evalExpr(expr.right);
-                if (a.type !== 'number' || b.type !== 'number') {
-                    this.throwTypeError(`invalid operands for numeric op: ${a.type} and ${b.type}`);
+
+                const an = this.coerceToPrimitive(a);
+                const bn = this.coerceToPrimitive(b);
+
+                if (an.type === 'number' && bn.type === 'number') {
+                    const result = implNumeric(an.value, bn.value);
+                    const rt = typeof result;
+                    assert(rt === 'number' || rt === 'boolean');
+                    return { type: rt, value: result };
                 }
-                const retVal = impl(a.value, b.value);
-                assert(typeof retVal === 'number' || typeof retVal === 'boolean');
-                return { type: typeof retVal, value: retVal };
+
+                const as = this.coerceToString(a);
+                const bs = this.coerceToString(b);
+                assert(typeof as === 'string', 'coerceToString bug (a)');
+                assert(typeof bs === 'string', 'coerceToString bug (b)');
+
+                const result = implString(as, bs);
+                const rt = typeof result;
+                assert(rt === 'string' || rt === 'boolean');
+                return { type: rt, value: result };
             };
 
             if (expr.operator === '===') {
@@ -1192,30 +1217,14 @@ export class VM {
                 ret.value = !ret.value;
                 return ret;
             }
-            else if (expr.operator === '+') {
-                const left = this.evalExpr(expr.left);
-                const right = this.evalExpr(expr.right);
-
-                const a = this.coerceToPrimitive(left);
-                const b = this.coerceToPrimitive(right);
-
-                if (a.type === 'number' && b.type === 'number') {
-                    return { type: 'number', value: a.value + b.value };
-                } else {
-                    const as = this.coerceToString(a);
-                    const bs = this.coerceToString(b);
-                    assert(typeof as === 'string', 'coerceToString bug (a)');
-                    assert(typeof bs === 'string', 'coerceToString bug (b)');
-                    return { type: 'string', value: as + bs };
-                }
-            }
-            else if (expr.operator === '<') { return numericOp((a, b) => (a < b)); }
-            else if (expr.operator === '<=') { return numericOp((a, b) => (a <= b)); }
-            else if (expr.operator === '>') { return numericOp((a, b) => (a > b)); }
-            else if (expr.operator === '>=') { return numericOp((a, b) => (a >= b)); }
-            else if (expr.operator === '-') { return numericOp((a, b) => (a - b)); }
-            else if (expr.operator === '*') { return numericOp((a, b) => (a * b)); }
-            else if (expr.operator === '/') { return numericOp((a, b) => (a / b)); }
+            else if (expr.operator === '+')  { return numberOrStringOp((a, b) => a + b, (a, b) => a + b); }
+            else if (expr.operator === '<')  { return numberOrStringOp((a, b) => (a < b),  (a, b) => (a < b)); }
+            else if (expr.operator === '<=') { return numberOrStringOp((a, b) => (a <= b), (a, b) => (a <= b)); }
+            else if (expr.operator === '>')  { return numberOrStringOp((a, b) => (a > b),  (a, b) => (a > b)); }
+            else if (expr.operator === '>=') { return numberOrStringOp((a, b) => (a >= b), (a, b) => (a >= b)); }
+            else if (expr.operator === '-')  { return numberOrStringOp((a, b) => (a - b),  (a, b) => (a - b)); }
+            else if (expr.operator === '*')  { return numberOrStringOp((a, b) => (a * b),  (a, b) => (a * b)); }
+            else if (expr.operator === '/')  { return numberOrStringOp((a, b) => (a / b),  (a, b) => (a / b)); }
             else if (expr.operator === 'instanceof') {
                 const constructor = this.evalExpr(expr.right);
                 let obj = this.evalExpr(expr.left);
@@ -1368,6 +1377,7 @@ export class VM {
             return false;
 
         const t = left.type;
+
         let value;
         if (left.type === 'object' && left.value === null)
             value = (right.type === 'object' && right.value === null);
@@ -1562,8 +1572,9 @@ export class VM {
     }
 
     coerceToString(value) {
-        if (value.type === 'object') {
-            if (value.value === null) return 'null';
+        if (value.type === 'object' && value.value === null) return 'null';
+
+        if (value instanceof VMObject) {
 
             // Objects are first converted to a primitive by calling its [Symbol.toPrimitive]() (with "string" as hint), toString(), and valueOf() methods, in that order. The resulting primitive is then converted to a string.
             const prim = this.coerceToPrimitive(value, 'toString first');
@@ -1575,7 +1586,7 @@ export class VM {
             return this.coerceToString(prim);
         }
 
-        assert(value.type === typeof value.value, "VM bug: invalid primitive value");
+        assert(value.type === typeof value.value, `VM bug: invalid primitive value: ${value.type} / ${typeof value.value}`);
         let str;
         if (value.type === 'string') str = value.value;
         else if (value.type === 'undefined') str = 'undefined';
@@ -1898,3 +1909,4 @@ class SourceWrapper {
 
 
 // vim:ts=4:sts=0:sw=0:et
+

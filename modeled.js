@@ -1208,7 +1208,7 @@ export class VM {
                 const bp = this.coerceToPrimitive(b, 'valueOf first');
 
                 if (ap.type === 'string' && bp.type === 'string') {
-                    const as = ap.value, bs = ap.value;
+                    const as = ap.value, bs = bp.value;
                     assert(typeof as === 'string', 'coerceToString bug (a)');
                     assert(typeof bs === 'string', 'coerceToString bug (b)');
 

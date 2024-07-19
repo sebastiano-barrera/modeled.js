@@ -187,6 +187,7 @@ const PROTO_FUNCTION = new VMObject(PROTO_OBJECT)
 const PROTO_NUMBER = new VMObject()
 const PROTO_BOOLEAN = new VMObject()
 const PROTO_STRING = new VMObject()
+const PROTO_SYMBOL = new VMObject()
 const PROTO_ARRAY = new VMObject()
 const PROTO_REGEXP = new VMObject();
 
@@ -988,6 +989,18 @@ export class VM {
         return ret;
     }
 
+    coerceToSymbol(value) {
+        assert (value.type === typeof value.value);
+
+        let ret;
+        if (value.type === 'symbol') ret = value.value;
+        else if (value.type === 'string') ret = Symbol(value.value);
+        else this.throwTypeError(`can't convert ${value.type} to symbol`);
+
+        assert(typeof ret === 'symbol');
+        return ret;
+    }
+
     exprs = {
         AssignmentExpression(expr) {
             let value = this.evalExpr(expr.right);
@@ -1526,12 +1539,13 @@ export class VM {
         Objects are first converted to a primitive by calling their [Symbol.toPrimitive]() (with "number" as hint), valueOf(), and toString() methods, in that order. The resulting primitive is then converted to a number.
         */
 
+        assert (typeof value.value === value.type);
         if (value.type === 'number') return value.value;
         if (value.type === 'undefined') return NaN;
         if (value.type === 'object' && value.value === null) return 0;
         if (value.type === 'boolean') return value.value ? 1 : 0;
         if (value.type === 'string') return +value.value;
-        if (value.type === 'bigint') this.throwTypeError("can't convert bigint to number");
+        if (value.type === 'bigint') return Number(value.value);
         if (value.type === 'symbol') this.throwTypeError("can't convert symbol to number");
         if (value instanceof VMObject)
             return this.coerceToNumber(this.coerceToPrimitive(value));
@@ -1559,7 +1573,7 @@ export class VM {
         else if (value.type === 'boolean') str = value.value ? 'true' : 'false';
         else if (value.type === 'number') str = Number.prototype.toString.call(value.value);
         else if (value.type === 'bigint') str = BigInt.prototype.toString.call(value.value);
-        else if (value.type === 'symbol') str = Symbol.prototype.toString.call(value.value);
+        else if (value.type === 'symbol') str = value.value;
         else throw new VMError('invalid value type: ' + value.type);
 
         assert(typeof str === 'string');
@@ -1738,17 +1752,21 @@ function createGlobalObject() {
         (vm, subject, args) => wrapPrimitive(subject, args[0], vm.coerceToBoolean, 'boolean', PROTO_BOOLEAN)
     ));
 
-    G.setProperty('Number', nativeVMFunc(
+    const consNumber = nativeVMFunc(
         (vm, subject, args) => wrapPrimitive(subject, args[0], vm.coerceToNumber, 'number', PROTO_NUMBER)
-    ));
-    G.getProperty('Number').setProperty('POSITIVE_INFINITY', {type: 'number', value: Infinity});
-    G.getProperty('Number').setProperty('NEGATIVE_INFINITY', {type: 'number', value: -Infinity});
-    G.getProperty('Number').setProperty('NaN', {type: 'number', value: NaN});
+    );
+    G.setProperty('Number', consNumber);
+    consNumber.setProperty('POSITIVE_INFINITY', {type: 'number', value: Infinity});
+    consNumber.setProperty('NEGATIVE_INFINITY', {type: 'number', value: -Infinity});
+    consNumber.setProperty('NaN', {type: 'number', value: NaN});
+    consNumber.setProperty('MIN_VALUE', {type: 'number', value: Number.MIN_VALUE});
+    consNumber.setProperty('MAX_VALUE', {type: 'number', value: Number.MAX_VALUE});
 
-    G.setProperty('String', nativeVMFunc(
+    const consString = nativeVMFunc(
         (vm, subject, args) => wrapPrimitive(subject, args[0], vm.coerceToString, 'string', PROTO_STRING)
-    ));
-    G.getOwnProperty('String').setProperty('fromCharCode', nativeVMFunc((vm, subject, args) => {
+    );
+    G.setProperty('String', consString);
+    consString.setProperty('fromCharCode', nativeVMFunc((vm, subject, args) => {
         const arg = args[0];
         if (arg === undefined || arg.type === 'undefined')
             return { type: 'string', value: '' };
@@ -1761,17 +1779,23 @@ function createGlobalObject() {
         return { type: 'string', value: ret };
     }));
 
-    G.setProperty('Array', nativeVMFunc((vm, subject, args) => {
+    const consSymbol = nativeVMFunc(
+        (vm, subject, args) => wrapPrimitive(subject, args[0], vm.coerceToSymbol, 'symbol', PROTO_SYMBOL)
+    );
+    G.setProperty('Symbol', consSymbol)
+
+    const consArray = nativeVMFunc((vm, subject, args) => {
         assert(subject.type === 'object', 'Only supported invoking via new Array()');
         return new VMArray();
-    }));
-    G.getProperty('Array').setProperty('isArray', nativeVMFunc((vm, subject, args) => {
+    });
+    G.setProperty('Array', consArray);
+    consArray.setProperty('isArray', nativeVMFunc((vm, subject, args) => {
         const value = subject instanceof VMArray;
         return { type: 'boolean', value };
     }));
-    G.getProperty('Array').setProperty('prototype', PROTO_ARRAY)
+    consArray.setProperty('prototype', PROTO_ARRAY)
 
-    G.setProperty('Function', nativeVMFunc((vm, subject, args) => {
+    const consFunction = nativeVMFunc((vm, subject, args) => {
         // even when invoked as `new Function(...)`, discard this, return another object
 
         if (args.length === 0 || args[0].type !== 'string')
@@ -1787,16 +1811,18 @@ function createGlobalObject() {
         assert(ast.type === 'Program');
         ast.type = 'BlockStatement';
         return vm.makeFunction([], ast, { scopeStrictnessIrrelevant: true });
-    }));
-    G.getProperty('Function').setProperty('prototype', PROTO_FUNCTION);
+    });
+    G.setProperty('Function', consFunction);
+    consFunction.setProperty('prototype', PROTO_FUNCTION);
 
-    G.setProperty('RegExp', nativeVMFunc((vm, subject, args) => {
+    const consRegExp = nativeVMFunc((vm, subject, args) => {
         const arg = args[0]
         if (arg.type !== 'string')
             vm.throwTypeError('RegExp constructor argument must be string');
         return createRegExpFromNative(new RegExp(arg.value))
-    }))
-    G.getProperty('RegExp').setProperty('prototype', PROTO_REGEXP)
+    });
+    G.setProperty('RegExp', consRegExp);
+    consRegExp.setProperty('prototype', PROTO_REGEXP)
 
     G.setProperty('eval', nativeVMFunc((vm, subject, args) => {
         // this function is only looked up for indirect eval; direct eval has a

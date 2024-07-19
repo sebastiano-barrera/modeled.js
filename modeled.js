@@ -1467,45 +1467,58 @@ export class VM {
             String to BigInt: convert the string to a BigInt using the same algorithm as the BigInt() constructor. If conversion fails, return false.
 
         */
-        let counter = 0;
         while(true) {
-            if (++counter === 3)
-                throw 'too many times!';
+            assert((left.type === 'object') === (left instanceof VMObject));
+            assert(left instanceof VMObject || left.type === 'null' || left.type === typeof left.value);
+            assert((right.type === 'object') === (right instanceof VMObject));
+            assert(right instanceof VMObject || right.type === 'null' || right.type === typeof right.value, `invalid right value: ${right.type} / ${typeof right.value}`);
 
-            if (left.type === 'undefined' || left.type === 'null')
-                return {
-                    type: 'boolean',
-                    value: right.type === 'undefined' || right.type === 'null',
-                };
+            if (left.type === right.type) {
+                const t = left.type;
+                let result;
+                if (t === 'object') { result = Object.is(left, right); }
+                else if (t === 'null' || t === 'undefined') { result = true; }
+                else if (
+                    t === 'string'
+                    || t === 'number'
+                    || t === 'boolean'
+                    || t === 'bigint'
+                    || t === 'symbol'
+                ) { result = left.value === right.value; }
+                else { throw new AssertionError('invalid value type: ' + left.type); }
 
-            if (left instanceof VMObject && right instanceof VMObject)
-                return { type: 'boolean', value: left.is(right) };
+                return { type: 'boolean', value: result };
+            }
+
+            const leftIsUN = (left.type === 'undefined' || left.type === 'null');
+            const rightIsUN = (right.type === 'undefined' || right.type === 'null');
+            if (leftIsUN || rightIsUN)
+                return { type: 'boolean', value: leftIsUN && rightIsUN };
 
             if (left instanceof VMObject && !(right instanceof VMObject)) {
                 left = this.coerceToPrimitive(left);
-                console.log('coerced left to primitive;', left);
+                console.log(' >> coerced left to primitive;', left);
                 continue;
             }
             if (!(left instanceof VMObject) && right instanceof VMObject) {
                 right = this.coerceToPrimitive(right);
-                console.log('coerced right to primitive;', right);
+                console.log(' >> coerced right to primitive;', right);
                 continue;
             }
 
             assert (left.type !== 'object');
             assert (right.type !== 'object');
 
-            if (left.type === right.type) {
-                assert(['string', 'number', 'boolean', 'bigint', 'symbol'].includes(left.type));
-                return { type: 'boolean', value: left.value === right.value };
-            } else if (left.type === 'symbol' || right.type === 'symbol') {
+            // If one of the operands is a Symbol but the other is not, return false.
+            if ((left.type === 'symbol') !== (right.type === 'symbol')) {
                 return {type: 'boolean', value: false};
-            } 
+            }
+
             // If one of the operands is a Boolean but the other is not,
             // convert the boolean to a number: true is converted to 1, and
             // false is converted to 0. Then compare the two operands
             // loosely again.
-            else if (left.type === 'boolean') {
+            if (left.type === 'boolean') {
                 left = {type: 'number', value: (left.value ? 1 : 0)};
                 continue;
             }
@@ -1528,8 +1541,11 @@ export class VM {
 
             // Number to BigInt: compare by their numeric value. If the
             // number is ±Infinity or NaN, return false.
-            else if (left.type === 'nubmer' && right.type === 'bigint') {
-                return {type: 'boolean', value: left.value === right.value};
+            else if (
+                (left.type === 'number' && right.type === 'bigint')
+                || (left.type === 'bigint' && right.type === 'number')
+            ) {
+                return {type: 'boolean', value: left.value == right.value};
             }
 
             // String to BigInt: convert the string to a BigInt using the
@@ -1543,6 +1559,8 @@ export class VM {
                 right = { type: 'number', value: this.coerceToBigInt(right) };
                 continue;
             }
+
+            assert(false, "unreachable!");
         }
     }
 

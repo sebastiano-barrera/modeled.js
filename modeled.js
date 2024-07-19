@@ -1153,7 +1153,7 @@ export class VM {
                 return {type: 'boolean', value: !value};
 
             } else if (expr.operator === '-') {
-                const value = this.coerceToNumber(this.evalExpr(expr.argument));
+                const value = this.coerceNumeric(this.evalExpr(expr.argument));
                 assert(typeof value === 'number' || typeof value === 'bigint');
                 return {type: typeof value, value: -value};
 
@@ -1174,11 +1174,15 @@ export class VM {
                 return { type: typeof retVal, value: retVal };
             };
 
-            if (expr.operator === '===') { return this.tripleEqual(expr.left, expr.right); }
+            if (expr.operator === '===') {
+                 const value = this.tripleEqual(expr.left, expr.right); 
+                 assert (typeof value === 'boolean');
+                 return {type: 'boolean', value};
+             }
             else if (expr.operator === '!==') {
                 const ret = this.tripleEqual(expr.left, expr.right);
-                ret.value = !ret.value;
-                return ret;
+                assert (typeof ret === 'boolean');
+                return {type: 'boolean', value: !ret};
             }
             else if (expr.operator === '==') {
                 return this.looseEqual(expr.left, expr.right);
@@ -1356,12 +1360,12 @@ export class VM {
         }
     }
 
-    tripleEqual(left, right) {
-        left = this.evalExpr(left);
-        right = this.evalExpr(right);
+    tripleEqual(leftExpr, rightExpr) {
+        const left = this.evalExpr(leftExpr);
+        const right = this.evalExpr(rightExpr);
 
         if (left.type !== right.type)
-            return { type: 'boolean', value: false };
+            return false;
 
         const t = left.type;
         let value;
@@ -1377,7 +1381,7 @@ export class VM {
         else { throw new VMError('invalid value type: ' + t); }
 
         assert(typeof value === 'boolean');
-        return { type: 'boolean', value };
+        return value;
     }
 
     looseEqual(left, right) {
@@ -1550,6 +1554,11 @@ export class VM {
         if (value instanceof VMObject)
             return this.coerceToNumber(this.coerceToPrimitive(value));
         throw new AssertionError('unreachable code!');
+    }
+    coerceNumeric(value) {
+        if (value.type === 'number' || value.type === 'bigint')
+            return value.value;
+        return this.coerceToNumber(value);
     }
 
     coerceToString(value) {
@@ -1889,4 +1898,3 @@ class SourceWrapper {
 
 
 // vim:ts=4:sts=0:sw=0:et
-

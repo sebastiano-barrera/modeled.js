@@ -19,7 +19,23 @@ class VMError extends Error { }
 
 class ProgramException extends Error {
     constructor(exceptionValue, context) {
-        super('interpreted js program exception');
+        console.log(exceptionValue)
+
+        let message;
+        if (exceptionValue.type === 'string') {
+            message = exceptionValue.value;
+        } else if (exceptionValue instanceof VMObject) {
+            const messageValue = exceptionValue.getProperty('message');
+            if (messageValue.type === 'string') {
+                message = messageValue.value;
+            }
+        }
+
+        assert(typeof message === 'undefined' || typeof message === 'string');
+        super(
+            'interpreted js program exception' +
+            (message ? `: ${message}` : '')
+        );
         this.exceptionValue = exceptionValue;
 
         this.context = context.map(node => {

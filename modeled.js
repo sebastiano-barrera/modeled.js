@@ -1005,6 +1005,7 @@ export class VM {
             number: this.globalObj.getProperty('Number'),
             boolean: this.globalObj.getProperty('Boolean'),
             string: this.globalObj.getProperty('String'),
+            symbol: this.globalObj.getProperty('Symbol'),
         }[value.type];
         if (cons) {
             const obj = this.performNew(cons, [value]);

@@ -376,9 +376,10 @@ function addValueOf(proto, primitiveType, consName) {
     }));
 }
 
-addValueOf(PROTO_NUMBER, 'number', 'Number');
-addValueOf(PROTO_STRING, 'string', 'String');
+addValueOf(PROTO_NUMBER,  'number',  'Number');
+addValueOf(PROTO_STRING,  'string',  'String');
 addValueOf(PROTO_BOOLEAN, 'boolean', 'Boolean');
+addValueOf(PROTO_SYMBOL,  'symbol',  'Symbol');
 
 
 PROTO_REGEXP.setProperty('test', nativeVMFunc((vm, subject, args) => {

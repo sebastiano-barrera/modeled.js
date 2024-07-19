@@ -1644,7 +1644,12 @@ function createGlobalObject() {
     createSimpleErrorType('NameError')
 
     const consObject = nativeVMFunc((vm, subject, args) => {
-        throw new Error('not yet implemented: Object()');
+        if (subject.type === 'undefined'
+        || (subject.type === 'object' && subject.value === null)) {
+            return new VMObject();
+        }
+
+        return vm.coerceToObject(subject);
     });
     consObject.setProperty('prototype', PROTO_OBJECT);
     consObject.setProperty('defineProperty', nativeVMFunc((vm, subject, args) => {

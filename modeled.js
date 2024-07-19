@@ -1205,6 +1205,11 @@ export class VM {
                 assert(typeof value === 'number' || typeof value === 'bigint');
                 return {type: typeof value, value: -value};
 
+            } else if (expr.operator === 'void') {
+                // evaluate and discard
+                this.evalExpr(expr.argument);
+                return {type: "undefined"};
+                
             } else {
                 throw new VMError('unsupported unary op: ' + expr.operator);
             }

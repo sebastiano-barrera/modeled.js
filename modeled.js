@@ -1370,6 +1370,8 @@ export class VM {
 
         Identifier(node) {
             if (node.name === 'undefined') return { type: "undefined" };
+            if (node.name === 'Infinity')  return { type: "number", value: Infinity };
+            if (node.name === 'NaN')       return { type: "number", value: NaN };
 
             const value = this.lookupVar(node.name);
             if (value === undefined)

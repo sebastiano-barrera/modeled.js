@@ -201,6 +201,7 @@ class VMArray extends VMObject {
 const PROTO_OBJECT = new VMObject(null)
 const PROTO_FUNCTION = new VMObject(PROTO_OBJECT)
 const PROTO_NUMBER = new VMObject()
+const PROTO_BIGINT = new VMObject()
 const PROTO_BOOLEAN = new VMObject()
 const PROTO_STRING = new VMObject()
 const PROTO_SYMBOL = new VMObject()
@@ -380,6 +381,7 @@ addValueOf(PROTO_NUMBER,  'number',  'Number');
 addValueOf(PROTO_STRING,  'string',  'String');
 addValueOf(PROTO_BOOLEAN, 'boolean', 'Boolean');
 addValueOf(PROTO_SYMBOL,  'symbol',  'Symbol');
+addValueOf(PROTO_BIGINT,  'bigint',  'BigInt');
 
 
 PROTO_REGEXP.setProperty('test', nativeVMFunc((vm, subject, args) => {
@@ -504,9 +506,9 @@ class VarScope extends Scope {
     }
 
     setVar(name, value, vm) {
-        assert (vm instanceof VM, "vm not passed (required to throw ReferenceError");
+        assert (vm instanceof VM, "vm not passed (required to throw ReferenceError)");
         if (this.vars.has(name)) this.vars.set(name, value);
-        else if (this.parent) this.parent.setVar(name, value);
+        else if (this.parent) this.parent.setVar(name, value, vm);
         else if (this.isStrict) {
             vm.throwError("NameError", 'unbound variable: ' + name);
         }
@@ -1002,6 +1004,14 @@ export class VM {
     coerceToObject(value) {
         if (value instanceof VMObject) return value;
 
+        // weird stupid case. why is BigInt not a constructor?
+        if (value.type === 'bigint') {
+            const obj = new VMObject(PROTO_BIGINT);
+            assert (typeof value.value === 'bigint');
+            obj.primitive = value.value;
+            return obj;
+        }
+
         const cons = {
             number: this.globalObj.getProperty('Number'),
             boolean: this.globalObj.getProperty('Boolean'),
@@ -1465,7 +1475,6 @@ export class VM {
             Number to String: convert the string to a number. Conversion failure results in NaN, which will guarantee the equality to be false.
             Number to BigInt: compare by their numeric value. If the number is ±Infinity or NaN, return false.
             String to BigInt: convert the string to a BigInt using the same algorithm as the BigInt() constructor. If conversion fails, return false.
-
         */
         while(true) {
             assert((left.type === 'object') === (left instanceof VMObject));
@@ -1552,11 +1561,11 @@ export class VM {
             // same algorithm as the BigInt() constructor. If conversion
             // fails, return false.
             else if (left.type === 'string' && right.type === 'bigint') {
-                left = { type: 'number', value: this.coerceToBigInt(left) };
+                left = { type: 'bigint', value: this.coerceToBigInt(left) };
                 continue;
             }
             else if (left.type === 'bigint' && right.type === 'string') {
-                right = { type: 'number', value: this.coerceToBigInt(right) };
+                right = { type: 'bigint', value: this.coerceToBigInt(right) };
                 continue;
             }
 
@@ -1632,7 +1641,25 @@ export class VM {
             return value.value;
         return this.coerceToNumber(value);
     }
+    coerceToBigInt(value) {
+        if (value instanceof VMObject)
+            value = this.coerceToPrimitive(value);
 
+        if (value.type === 'null' || value.type === 'undefined' || value.type === 'symbol') {
+            this.throwError("TypeError", "can't convert to BigInt from " + value.type);
+        }
+
+        let ret;
+        if (value.type === 'number') ret = BigInt(value.value);
+        else if (value.type === 'boolean') ret = BigInt(value.value ? 1 : 0);
+        else if (value.type === 'string') ret = BigInt(value.value);
+        else if (value.type === 'bigint') ret = value.value;
+        else throw new AssertionError('unreachable! invalid value type: ' + value.type); 
+
+        assert (typeof ret === 'bigint');
+        return ret;
+    }
+ 
     coerceToString(value) {
 
         if (value instanceof VMObject) {
@@ -1730,6 +1757,12 @@ function createGlobalObject() {
     createSimpleErrorType('NameError')
 
     const consObject = nativeVMFunc((vm, subject, args) => {
+        if (subject instanceof VMObject) {
+            // when called via new, subject is already a freshly created object. sufficient to be returned from this constructor
+            return subject;
+        }
+
+        if (subject.type === 'undefined') subject = args[0] || {type: 'undefined'};
         if (subject.type === 'undefined' || subject.type === 'null') {
             return new VMObject();
         }
@@ -1857,6 +1890,16 @@ function createGlobalObject() {
     consNumber.setProperty('NaN', {type: 'number', value: NaN});
     consNumber.setProperty('MIN_VALUE', {type: 'number', value: Number.MIN_VALUE});
     consNumber.setProperty('MAX_VALUE', {type: 'number', value: Number.MAX_VALUE});
+
+    G.setProperty('BigInt', nativeVMFunc((vm, subject, args) => {
+        if (subject.type !== 'undefined') {
+            vm.throwError('TypeError', "BigInt can't be called as constructor (new BigInt(...))");
+        }
+
+        const value = vm.coerceToBigInt(args[0]);
+        assert(typeof value === 'bigint');
+        return {type: 'bigint', value};
+    }));
 
     const consString = addPrimitiveWrapperConstructor('String', PROTO_STRING, 'string', 'coerceToString');
     consString.setProperty('fromCharCode', nativeVMFunc((vm, subject, args) => {

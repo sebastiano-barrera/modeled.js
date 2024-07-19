@@ -345,12 +345,18 @@ PROTO_STRING.setProperty('replace', nativeVMFunc((vm, subject, args) => {
 
 
 PROTO_NUMBER.setProperty('toString', nativeVMFunc((vm, subject, args) => {
-    if (subject.type !== 'number')
+    if (!Object.is(subject.proto, PROTO_NUMBER) || typeof subject.primitive !== 'number')
         vm.throwTypeError('Number.prototype.toString must be called on number');
 
     assert(typeof subject.value === 'number');
     return Number.prototype.toString.call(subject.value);
-}))
+}));
+PROTO_NUMBER.setProperty('valueOf', nativeVMFunc((vm, subject, args) => {
+    if (!Object.is(subject.proto, PROTO_NUMBER) || typeof subject.primitive !== 'number')
+        vm.throwTypeError("Number.prototype.valueOf must be called on a Number");
+
+    return {type: 'number', value: subject.primitive};
+}));
 
 PROTO_REGEXP.setProperty('test', nativeVMFunc((vm, subject, args) => {
     const arg = args[0]
@@ -967,14 +973,18 @@ export class VM {
     }
 
     coerceToObject(value) {
-        if (value instanceof VMObject && value.value !== null) return value;
+        if (value instanceof VMObject) return value;
 
         const cons = {
             number: this.globalObj.getProperty('Number'),
             boolean: this.globalObj.getProperty('Boolean'),
             string: this.globalObj.getProperty('String'),
         }[value.type];
-        if (cons) return this.performNew(cons, [value]);
+        if (cons) {
+            const obj = this.performNew(cons, [value]);
+            assert (obj instanceof VMObject);
+            return obj;
+        }
 
         this.throwTypeError("can't convert value to object: " + Deno.inspect(value));
     }
@@ -1178,24 +1188,30 @@ export class VM {
                 const a = this.evalExpr(expr.left);
                 const b = this.evalExpr(expr.right);
 
-                const an = this.coerceToPrimitive(a);
-                const bn = this.coerceToPrimitive(b);
+                const ap = this.coerceToPrimitive(a, 'valueOf first');
+                const bp = this.coerceToPrimitive(b, 'valueOf first');
 
-                if (an.type === 'number' && bn.type === 'number') {
-                    const result = implNumeric(an.value, bn.value);
+                if (ap.type === 'string' && bp.type === 'string') {
+                    const as = ap.value, bs = ap.value;
+                    assert(typeof as === 'string', 'coerceToString bug (a)');
+                    assert(typeof bs === 'string', 'coerceToString bug (b)');
+
+                    const result = implString(as, bs);
+
                     const rt = typeof result;
-                    assert(rt === 'number' || rt === 'boolean');
+                    assert(rt === 'string' || rt === 'boolean');
                     return { type: rt, value: result };
                 }
 
-                const as = this.coerceToString(a);
-                const bs = this.coerceToString(b);
-                assert(typeof as === 'string', 'coerceToString bug (a)');
-                assert(typeof bs === 'string', 'coerceToString bug (b)');
-
-                const result = implString(as, bs);
+                // TODO coerce to numeric, handle bigint cases
+                const an = this.coerceToNumber(ap);
+                assert (typeof an === 'number');
+                const bn = this.coerceToNumber(bp);
+                assert (typeof bn === 'number');
+                
+                const result = implNumeric(an, bn);
                 const rt = typeof result;
-                assert(rt === 'string' || rt === 'boolean');
+                assert(rt === 'number' || rt === 'boolean');
                 return { type: rt, value: result };
             };
 
@@ -1203,7 +1219,7 @@ export class VM {
                  const value = this.tripleEqual(expr.left, expr.right); 
                  assert (typeof value === 'boolean');
                  return {type: 'boolean', value};
-             }
+            }
             else if (expr.operator === '!==') {
                 const ret = this.tripleEqual(expr.left, expr.right);
                 assert (typeof ret === 'boolean');
@@ -1217,14 +1233,14 @@ export class VM {
                 ret.value = !ret.value;
                 return ret;
             }
-            else if (expr.operator === '+')  { return numberOrStringOp((a, b) => a + b, (a, b) => a + b); }
-            else if (expr.operator === '<')  { return numberOrStringOp((a, b) => (a < b),  (a, b) => (a < b)); }
-            else if (expr.operator === '<=') { return numberOrStringOp((a, b) => (a <= b), (a, b) => (a <= b)); }
-            else if (expr.operator === '>')  { return numberOrStringOp((a, b) => (a > b),  (a, b) => (a > b)); }
-            else if (expr.operator === '>=') { return numberOrStringOp((a, b) => (a >= b), (a, b) => (a >= b)); }
-            else if (expr.operator === '-')  { return numberOrStringOp((a, b) => (a - b),  (a, b) => (a - b)); }
-            else if (expr.operator === '*')  { return numberOrStringOp((a, b) => (a * b),  (a, b) => (a * b)); }
-            else if (expr.operator === '/')  { return numberOrStringOp((a, b) => (a / b),  (a, b) => (a / b)); }
+            else if (expr.operator === '+')  { return numberOrStringOp((a, b) => a + b,  (a, b) => a + b); }
+            else if (expr.operator === '<')  { return numberOrStringOp((a, b) => a < b,  (a, b) => a < b); }
+            else if (expr.operator === '<=') { return numberOrStringOp((a, b) => a <= b, (a, b) => a <= b); }
+            else if (expr.operator === '>')  { return numberOrStringOp((a, b) => a > b,  (a, b) => a > b); }
+            else if (expr.operator === '>=') { return numberOrStringOp((a, b) => a >= b, (a, b) => a >= b); }
+            else if (expr.operator === '-')  { return numberOrStringOp((a, b) => a - b,  (a, b) => a - b); }
+            else if (expr.operator === '*')  { return numberOrStringOp((a, b) => a * b,  (a, b) => a * b); }
+            else if (expr.operator === '/')  { return numberOrStringOp((a, b) => a / b,  (a, b) => a / b); }
             else if (expr.operator === 'instanceof') {
                 const constructor = this.evalExpr(expr.right);
                 let obj = this.evalExpr(expr.left);
@@ -1377,12 +1393,11 @@ export class VM {
         let value;
         if (left instanceof VMObject)
             value = Object.is(left, right);
-        else if (left.type === 'null')
-            value = (right.type === 'null');
-        else if (t === 'boolean') value = (left.value === right.value);
-        else if (t === 'string') value = (left.value === right.value);
-        else if (t === 'number') value = (left.value === right.value);
-        else if (t === 'bigint') value = (left.value === right.value);
+        else if (t === 'null')      value = (right.type === 'null');
+        else if (t === 'boolean')   value = (left.value === right.value);
+        else if (t === 'string')    value = (left.value === right.value);
+        else if (t === 'number')    value = (left.value === right.value);
+        else if (t === 'bigint')    value = (left.value === right.value);
         else if (t === 'undefined') value = true;
         else { throw new VMError('invalid value type: ' + t); }
 
@@ -1499,12 +1514,10 @@ export class VM {
 
     coerceToPrimitive(value, order = 'valueOf first') {
         if (value instanceof VMObject) {
-            let methods = {
-                'valueOf first': ['valueOf', 'toString'],
-                'toString first': ['toString', 'valueOf'],
-            }[order];
-            if (methods === undefined)
-                throw new VMError('invalid value for arg "order": ' + order);
+            let methods;
+                 if (order === 'valueOf first')  methods = ['valueOf', 'toString'];
+            else if (order === 'toString first') methods = ['toString', 'valueOf'];
+            else throw new VMError('invalid value for arg "order": ' + order);
 
             for (const methodName of methods) {
                 const method = value.getProperty(methodName);
@@ -1549,10 +1562,11 @@ export class VM {
         Objects are first converted to a primitive by calling their [Symbol.toPrimitive]() (with "number" as hint), valueOf(), and toString() methods, in that order. The resulting primitive is then converted to a number.
         */
 
+        if (value.type === 'null') return 0;
+        
         assert (typeof value.value === value.type);
         if (value.type === 'number') return value.value;
         if (value.type === 'undefined') return NaN;
-        if (value.type === 'null') return 0;
         if (value.type === 'boolean') return value.value ? 1 : 0;
         if (value.type === 'string') return +value.value;
         if (value.type === 'bigint') return Number(value.value);
@@ -1581,16 +1595,18 @@ export class VM {
             return this.coerceToString(prim);
         }
 
-        assert(value.type === typeof value.value, `VM bug: invalid primitive value: ${value.type} / ${typeof value.value}`);
         let str;
         if (value.type === 'null') str = 'null';
-        else if (value.type === 'string') str = value.value;
-        else if (value.type === 'undefined') str = 'undefined';
-        else if (value.type === 'boolean') str = value.value ? 'true' : 'false';
-        else if (value.type === 'number') str = Number.prototype.toString.call(value.value);
-        else if (value.type === 'bigint') str = BigInt.prototype.toString.call(value.value);
-        else if (value.type === 'symbol') str = value.value;
-        else throw new VMError('invalid value type: ' + value.type);
+        else {
+            assert(value.type === typeof value.value, `VM bug: invalid primitive value: ${value.type} / ${typeof value.value}`);
+            if (value.type === 'string') str = value.value;
+            else if (value.type === 'undefined') str = 'undefined';
+            else if (value.type === 'boolean') str = value.value ? 'true' : 'false';
+            else if (value.type === 'number') str = Number.prototype.toString.call(value.value);
+            else if (value.type === 'bigint') str = BigInt.prototype.toString.call(value.value);
+            else if (value.type === 'symbol') str = value.value;
+            else throw new VMError('invalid value type: ' + value.type);
+        }
 
         assert(typeof str === 'string');
         return str;
@@ -1763,14 +1779,17 @@ function createGlobalObject() {
         return {type: primType, value: prim};
     }
 
-    G.setProperty('Boolean', nativeVMFunc(
+    const consBoolean = nativeVMFunc(
         (vm, subject, args) => wrapPrimitive(subject, args[0], vm.coerceToBoolean, 'boolean', PROTO_BOOLEAN)
-    ));
-
+    );
+    G.setProperty('Boolean', consBoolean);
+    consBoolean.setProperty('prototype', PROTO_BOOLEAN);
+;
     const consNumber = nativeVMFunc(
         (vm, subject, args) => wrapPrimitive(subject, args[0], vm.coerceToNumber, 'number', PROTO_NUMBER)
     );
     G.setProperty('Number', consNumber);
+    consNumber.setProperty('prototype', PROTO_NUMBER);
     consNumber.setProperty('POSITIVE_INFINITY', {type: 'number', value: Infinity});
     consNumber.setProperty('NEGATIVE_INFINITY', {type: 'number', value: -Infinity});
     consNumber.setProperty('NaN', {type: 'number', value: NaN});
@@ -1797,6 +1816,7 @@ function createGlobalObject() {
     const consSymbol = nativeVMFunc(
         (vm, subject, args) => wrapPrimitive(subject, args[0], vm.coerceToSymbol, 'symbol', PROTO_SYMBOL)
     );
+    consSymbol.setProperty('prototype', PROTO_SYMBOL)
     G.setProperty('Symbol', consSymbol)
 
     const consArray = nativeVMFunc((vm, subject, args) => {
@@ -1886,10 +1906,17 @@ function createGlobalObject() {
         return { type: 'undefined' }
     }));
 
-    for (const name in G.properties) {
-        const value = G.properties[name];
-        if (value instanceof VMFunction) {
+    for (const name of G.getOwnPropertyNames()) {
+        const value = G.getProperty(name);
+
+        if (value instanceof VMInvokable) {
             value.name = name;
+
+            const prototype = value.getProperty('prototype');
+            assert (
+                prototype instanceof VMObject,
+                'constructor must have .prototype property',
+            );
         }
     }
 
@@ -1904,4 +1931,3 @@ class SourceWrapper {
 
 
 // vim:ts=4:sts=0:sw=0:et
-

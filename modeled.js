@@ -1806,27 +1806,34 @@ function createGlobalObject() {
         return {type: primType, value: prim};
     }
 
-    const consBoolean = nativeVMFunc(
-        (vm, subject, args) => wrapPrimitive(subject, args[0], vm.coerceToBoolean, 'boolean', PROTO_BOOLEAN)
-    );
-    G.setProperty('Boolean', consBoolean);
-    consBoolean.setProperty('prototype', PROTO_BOOLEAN);
-;
-    const consNumber = nativeVMFunc(
-        (vm, subject, args) => wrapPrimitive(subject, args[0], vm.coerceToNumber, 'number', PROTO_NUMBER)
-    );
-    G.setProperty('Number', consNumber);
-    consNumber.setProperty('prototype', PROTO_NUMBER);
+    function addPrimitiveWrapperConstructor(name, prototype, primType, coercerName) {
+        const cons = nativeVMFunc((vm, subject, args) => {
+            const prim = vm[coercerName](args[0]);
+            assert(typeof(prim) === primType, `coercer returned <${typeof prim}>, expected <${primType}>`);
+
+            if (subject instanceof VMObject) {
+                subject = new VMObject(prototype);
+                subject.primitive = prim;
+                return subject;
+            }
+            return {type: primType, value: prim};
+        });
+
+        G.setProperty(name, cons);
+        cons.setProperty('prototype', prototype);
+        return cons;
+    }
+
+    const consBoolean = addPrimitiveWrapperConstructor('Boolean', PROTO_BOOLEAN, 'boolean', 'coerceToBoolean');
+
+    const consNumber = addPrimitiveWrapperConstructor('Number', PROTO_NUMBER, 'number', 'coerceToNumber');
     consNumber.setProperty('POSITIVE_INFINITY', {type: 'number', value: Infinity});
     consNumber.setProperty('NEGATIVE_INFINITY', {type: 'number', value: -Infinity});
     consNumber.setProperty('NaN', {type: 'number', value: NaN});
     consNumber.setProperty('MIN_VALUE', {type: 'number', value: Number.MIN_VALUE});
     consNumber.setProperty('MAX_VALUE', {type: 'number', value: Number.MAX_VALUE});
 
-    const consString = nativeVMFunc(
-        (vm, subject, args) => wrapPrimitive(subject, args[0], vm.coerceToString, 'string', PROTO_STRING)
-    );
-    G.setProperty('String', consString);
+    const consString = addPrimitiveWrapperConstructor('String', PROTO_STRING, 'string', 'coerceToString');
     consString.setProperty('fromCharCode', nativeVMFunc((vm, subject, args) => {
         const arg = args[0];
         if (arg === undefined || arg.type === 'undefined')
@@ -1840,11 +1847,8 @@ function createGlobalObject() {
         return { type: 'string', value: ret };
     }));
 
-    const consSymbol = nativeVMFunc(
-        (vm, subject, args) => wrapPrimitive(subject, args[0], vm.coerceToSymbol, 'symbol', PROTO_SYMBOL)
-    );
-    consSymbol.setProperty('prototype', PROTO_SYMBOL)
-    G.setProperty('Symbol', consSymbol)
+
+    const consSymbol = addPrimitiveWrapperConstructor("Symbol", PROTO_SYMBOL, 'symbol', 'coerceToSymbol');
 
     const consArray = nativeVMFunc((vm, subject, args) => {
         assert(subject.type === 'object', 'Only supported invoking via new Array()');
@@ -1934,7 +1938,7 @@ function createGlobalObject() {
     }));
 
     for (const name of G.getOwnPropertyNames()) {
-        const value = G.getProperty(name);
+        const value = G.getOwnProperty(name);
 
         if (value instanceof VMInvokable) {
             value.name = name;

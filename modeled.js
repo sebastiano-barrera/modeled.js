@@ -58,6 +58,7 @@ class VMObject {
     getOwnProperty(name, vm = undefined) {
         assert(typeof name === 'string');
 
+        console.log('looking up property:', name);
         const descriptor = this.getOwnPropertyDescriptor(name);
         if (descriptor === undefined) return { type: 'undefined' };
 
@@ -71,15 +72,16 @@ class VMObject {
         assert(typeof name === 'string');
 
         let object = this;
-        while (object !== null) {
-            let value = object.getOwnProperty(name, vm);
-            if (value.type !== 'undefined') {
-                return value;
-            }
+        let descriptor;
+        do {
+            descriptor = object.getOwnPropertyDescriptor(name, vm);
             object = object.proto;
-        }
+        } while (object !== null && descriptor === undefined);
 
-        return { type: 'undefined' };
+        if (descriptor === undefined) return { type: 'undefined' };
+        
+        // found the descriptor in object, but call the descriptor with this
+        return this.resolveDescriptor(descriptor, vm);
     }
     setProperty(name, value, vm) {
         assert(typeof name === 'string');
@@ -116,14 +118,16 @@ class VMObject {
         assert(typeof descriptor === 'object', 'VM bug: descriptor is not an object')
 
         if (descriptor.get || descriptor.set) {
-            assert(
-                descriptor.get === undefined || descriptor.get instanceof VMInvokable,
-                'invalid descriptor: `get` is not a function'
-            );
-            assert(
-                descriptor.set === undefined || descriptor.set instanceof VMInvokable,
-                'invalid descriptor: `set` is not a function'
-            );
+            function assertUndefinedOrFunction(key) {
+                const val = descriptor[key];
+                assert(
+                    val === undefined || val.type === 'undefined' || val instanceof VMInvokable,
+                    `invalid descriptor: '${key}' is not a function`
+                );
+    
+            }
+            assertUndefinedOrFunction('get');
+            assertUndefinedOrFunction('set');
         }
 
         for (const key of ['writable', 'configurable', 'enumerable']) {
@@ -1176,6 +1180,14 @@ export class VM {
                 ret.value = !ret.value;
                 return ret;
             }
+            else if (expr.operator === '==') {
+                return this.looseEqual(expr.left, expr.right);
+            }
+            else if (expr.operator === '!=') {
+                const ret = this.looseEqual(expr.left, expr.right);
+                ret.value = !ret.value;
+                return ret;
+            }
             else if (expr.operator === '+') {
                 const left = this.evalExpr(expr.left);
                 const right = this.evalExpr(expr.right);
@@ -1368,6 +1380,112 @@ export class VM {
         return { type: 'boolean', value };
     }
 
+    looseEqual(left, right) {
+        left = this.evalExpr(left);
+        right = this.evalExpr(right);
+        const ret = this._looseEqual(left, right);
+        if (!ret.value) console.log('loose unequal', {left, right});
+        return ret;
+    }
+    _looseEqual(left, right) {
+        /*
+
+        If the operands have the same type, they are compared as follows:
+            Object: return true only if both operands reference the same object.
+            String: return true only if both operands have the same characters in the same order.
+            Number: return true only if both operands have the same value. +0 and -0 are treated as the same value. If either operand is NaN, return false; so, NaN is never equal to NaN.
+            Boolean: return true only if operands are both true or both false.
+            BigInt: return true only if both operands have the same value.
+            Symbol: return true only if both operands reference the same symbol.
+        If one of the operands is null or undefined, the other must also be null or undefined to return true. Otherwise return false.
+        If one of the operands is an object and the other is a primitive, convert the object to a primitive.
+        At this step, both operands are converted to primitives (one of String, Number, Boolean, Symbol, and BigInt). The rest of the conversion is done case-by-case.
+            If they are of the same type, compare them using step 1.
+            If one of the operands is a Symbol but the other is not, return false.
+            If one of the operands is a Boolean but the other is not, convert the boolean to a number: true is converted to 1, and false is converted to 0. Then compare the two operands loosely again.
+            Number to String: convert the string to a number. Conversion failure results in NaN, which will guarantee the equality to be false.
+            Number to BigInt: compare by their numeric value. If the number is ±Infinity or NaN, return false.
+            String to BigInt: convert the string to a BigInt using the same algorithm as the BigInt() constructor. If conversion fails, return false.
+
+        */
+        let counter = 0;
+        while(true) {
+            if (++counter === 3)
+                throw 'too many times!';
+            if (left.type === 'undefined' || (left.type === 'object' && left.value === null))
+                return {
+                    type: 'boolean',
+                    value: right.type === 'undefined' || (right.type === 'object' && right.value === null),
+                };
+
+            if (left instanceof VMObject && right instanceof VMObject)
+                return { type: 'boolean', value: left.is(right) };
+
+            if (left instanceof VMObject && !(right instanceof VMObject)) {
+                left = this.coerceToPrimitive(left);
+                console.log('coerced left to primitive;', left);
+                continue;
+            }
+            if (!(left instanceof VMObject) && right instanceof VMObject) {
+                right = this.coerceToPrimitive(right);
+                console.log('coerced right to primitive;', right);
+                continue;
+            }
+
+            assert (left.type !== 'object');
+            assert (right.type !== 'object');
+
+            if (left.type === right.type) {
+                assert(['string', 'number', 'boolean', 'bigint', 'symbol'].includes(left.type));
+                return { type: 'boolean', value: left.value === right.value };
+            } else if (left.type === 'symbol' || right.type === 'symbol') {
+                return {type: 'boolean', value: false};
+            } 
+            // If one of the operands is a Boolean but the other is not,
+            // convert the boolean to a number: true is converted to 1, and
+            // false is converted to 0. Then compare the two operands
+            // loosely again.
+            else if (left.type === 'boolean') {
+                left = {type: 'number', value: (left.value ? 1 : 0)};
+                continue;
+            }
+            else if (right.type === 'boolean') {
+                right = {type: 'number', value: (right.value ? 1 : 0)};
+                continue;
+            }
+
+            // Number to String: convert the string to a number. Conversion
+            // failure results in NaN, which will guarantee the equality to
+            // be false.
+            else if (left.type === 'string' && right.type === 'number') {
+                left = { type: 'number', value: this.coerceToNumber(left) };
+                continue;
+            }
+            else if (left.type === 'number' && right.type === 'string') {
+                right = { type: 'number', value: this.coerceToNumber(right) };
+                continue;
+            }
+
+            // Number to BigInt: compare by their numeric value. If the
+            // number is ±Infinity or NaN, return false.
+            else if (left.type === 'nubmer' && right.type === 'bigint') {
+                return {type: 'boolean', value: left.value === right.value};
+            }
+
+            // String to BigInt: convert the string to a BigInt using the
+            // same algorithm as the BigInt() constructor. If conversion
+            // fails, return false.
+            else if (left.type === 'string' && right.type === 'bigint') {
+                left = { type: 'number', value: this.coerceToBigInt(left) };
+                continue;
+            }
+            else if (left.type === 'bigint' && right.type === 'string') {
+                right = { type: 'number', value: this.coerceToBigInt(right) };
+                continue;
+            }
+        }
+    }
+
     coerceToPrimitive(value, order = 'valueOf first') {
         if (value instanceof VMObject) {
             let methods = {
@@ -1380,10 +1498,13 @@ export class VM {
             for (const methodName of methods) {
                 const method = value.getProperty(methodName);
                 if (method instanceof VMInvokable) {
+                    console.log(`invoking object's ${methodName}`)
                     const ret = method.invoke(this, value, []);
                     // primitive: can be used
                     if (ret.type !== 'object' && ret.type !== 'undefined')
                         return ret;
+                } else {
+                    console.log(`object has no method named ${methodName}`)
                 }
             }
 
@@ -1393,6 +1514,40 @@ export class VM {
             assert(typeof value.type === 'string', 'invalid value');
             return value;
         }
+    }
+
+    coerceToNumber(value) {
+        /*
+        Numbers are returned as-is.
+        undefined turns into NaN.
+        null turns into 0.
+        true turns into 1; false turns into 0.
+        Strings are converted by parsing them as if they contain a number literal. 
+        Parsing failure results in NaN. There are some minor differences compared to an actual number literal:
+            Leading and trailing whitespace/line terminators are ignored. A leading
+            0 digit does not cause the number to become an octal literal (or get
+            rejected in strict mode). + and - are allowed at the start of the string
+            to indicate its sign. (In actual code, they "look like" part of the
+            literal, but are actually separate unary operators.) However, the sign
+            can only appear once, and must not be followed by whitespace. Infinity
+            and -Infinity are recognized as literals. In actual code, they are
+            global variables. Empty or whitespace-only strings are converted to 0.
+            Numeric separators are not allowed.
+        BigInts throw a TypeError to prevent unintended implicit coercion causing loss of precision.
+        Symbols throw a TypeError.
+        Objects are first converted to a primitive by calling their [Symbol.toPrimitive]() (with "number" as hint), valueOf(), and toString() methods, in that order. The resulting primitive is then converted to a number.
+        */
+
+        if (value.type === 'number') return value.value;
+        if (value.type === 'undefined') return NaN;
+        if (value.type === 'object' && value.value === null) return 0;
+        if (value.type === 'boolean') return value.value ? 1 : 0;
+        if (value.type === 'string') return +value.value;
+        if (value.type === 'bigint') this.throwTypeError("can't convert bigint to number");
+        if (value.type === 'symbol') this.throwTypeError("can't convert symbol to number");
+        if (value instanceof VMObject)
+            return this.coerceToNumber(this.coerceToPrimitive(value));
+        throw new AssertionError('unreachable code!');
     }
 
     coerceToString(value) {
@@ -1507,19 +1662,21 @@ function createGlobalObject() {
             vm.throwError("TypeError", 'invalid descriptor: not an object');
 
         let getter, setter;
-        if (descriptor.hasProperty('get') || descriptor.hasProperty('set')) {
-            getter = descriptor.getProperty('get');
-            if (!(getter.type === "undefined" || getter instanceof VMInvokable))
-                vm.throwError("TypeError", 'invalid descriptor: `get` is not a function');
+        if (descriptor.hasOwnProperty('get') || descriptor.hasOwnProperty('set')) {
+            function checkFunc(key) {
+                const value = descriptor.getProperty(key);
+                if (!(value === undefined || value.type === "undefined" || value instanceof VMInvokable))
+                    vm.throwError("TypeError", `invalid descriptor: '${key}' is not a function`);
+                return value;
+            }
 
-            setter = descriptor.getProperty('set');
-            if (!(setter.type === "undefined" || setter instanceof VMInvokable))
-                vm.throwError("TypeError", 'invalid descriptor: `set` is not a function');
+            getter = checkFunc('get');
+            setter = checkFunc('set');
         }
 
         function parseBool(key) {
             const value = descriptor.getProperty('writable');
-            if (value.type === 'undefined') value = { type: 'boolean', value: true };
+            if (value.type === 'undefined') return true;
             if (value.type === 'boolean')
                 vm.throwError("TypeError", 'invalid descriptor: `writable` is not a boolean');
             return value.value;

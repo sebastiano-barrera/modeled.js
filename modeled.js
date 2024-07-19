@@ -367,12 +367,19 @@ PROTO_NUMBER.setProperty('toString', nativeVMFunc((vm, subject, args) => {
     assert(typeof subject.value === 'number');
     return Number.prototype.toString.call(subject.value);
 }));
-PROTO_NUMBER.setProperty('valueOf', nativeVMFunc((vm, subject, args) => {
-    if (!Object.is(subject.proto, PROTO_NUMBER) || typeof subject.primitive !== 'number')
-        vm.throwTypeError("Number.prototype.valueOf must be called on a Number");
 
-    return {type: 'number', value: subject.primitive};
-}));
+function addValueOf(proto, primitiveType, consName) {
+    proto.setProperty('valueOf', nativeVMFunc((vm, subject, args) => {
+        if (!Object.is(subject.proto, proto) || typeof subject.primitive !== primitiveType)
+            vm.throwTypeError(`${consName}.prototype.valueOf must be called on an ${consName} instance`);
+        return {type: primitiveType, value: subject.primitive};
+    }));
+}
+
+addValueOf(PROTO_NUMBER, 'number', 'Number');
+addValueOf(PROTO_STRING, 'string', 'String');
+addValueOf(PROTO_BOOLEAN, 'boolean', 'Boolean');
+
 
 PROTO_REGEXP.setProperty('test', nativeVMFunc((vm, subject, args) => {
     const arg = args[0]

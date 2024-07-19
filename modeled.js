@@ -502,14 +502,12 @@ class VarScope extends Scope {
         this.vars.set(name, value);
     }
 
-    setVar(name, value) {
+    setVar(name, value, vm) {
+        assert (vm instanceof VM, "vm not passed (required to throw ReferenceError");
         if (this.vars.has(name)) this.vars.set(name, value);
         else if (this.parent) this.parent.setVar(name, value);
-        else {
-            const exc = new VMObject();
-            exc.setProperty('name', { type: 'string', value: 'NameError' });
-            exc.setProperty('message', { type: 'string', value: 'unbound variable: ' + name })
-            throw new ProgramException(exc, [...this.synCtx]);
+        else if (this.isStrict) {
+            vm.throwError("NameError", 'unbound variable: ' + name);
         }
     }
 
@@ -544,9 +542,14 @@ class EnvScope extends Scope {
         );
         this.env.setProperty(name, value);
     }
-    setVar(name, value) {
+    setVar(name, value, vm) {
+        assert (vm instanceof VM, 'bug: vm not passed (required to throw ReferenceError)');
+
         // afaiu, this assert can only fail with a bug
-        assert(this.env.hasOwnProperty(name), 'assignment to undeclared global variable: ' + name);
+        if (this.isSetStrict && !this.env.hasOwnProperty(name)) {
+            vm.throwError("ReferenceError", 'assignment to undeclared global variable: ' + name);
+        }
+        
         this.env.setProperty(name, value);
     }
 
@@ -577,7 +580,7 @@ export class VM {
     //
 
     defineVar(kind, name, value) { return this.currentScope.defineVar(kind, name, value); }
-    setVar(name, value) { return this.currentScope.setVar(name, value); }
+    setVar(name, value) { return this.currentScope.setVar(name, value, this); }
     deleteVar(name) { return this.currentScope.deleteVar(name); }
     lookupVar(name, value) { return this.currentScope.lookupVar(name, value); }
     setDoNotDelete(name) { return this.currentScope.setDoNotDelete(name); }
@@ -1075,8 +1078,7 @@ export class VM {
                 throw new VMError('unsupported update operator: ' + expr.operator);
             }
 
-            this.doAssignment(expr.argument, newValue);
-            return newValue;
+            return this.doAssignment(expr.argument, newValue);
         },
 
         FunctionExpression(expr) {

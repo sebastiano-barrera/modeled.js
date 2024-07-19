@@ -58,7 +58,6 @@ class VMObject {
     getOwnProperty(name, vm = undefined) {
         assert(typeof name === 'string');
 
-        console.log('looking up property:', name);
         const descriptor = this.getOwnPropertyDescriptor(name);
         if (descriptor === undefined) return { type: 'undefined' };
 
@@ -1412,6 +1411,7 @@ export class VM {
         while(true) {
             if (++counter === 3)
                 throw 'too many times!';
+
             if (left.type === 'undefined' || (left.type === 'object' && left.value === null))
                 return {
                     type: 'boolean',

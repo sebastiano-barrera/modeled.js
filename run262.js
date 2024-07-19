@@ -51,17 +51,22 @@ if (args.single) {
   
   const LINE_COUNT_LIMIT = 20
 
-  console.log('')
-  console.log(`${failures.length} failures:`)
-  for (const oc of failures) {
-    console.log(`%c --- ${oc.testcase}`, 'color: red')
+  if (failures.length === 0) {
+    console.log('%c     NO FAILURES, IT ALL AL WORKS LFGGGGGG ', 'color: cyan')
+    
+  } else {
+    console.log('')
+    console.log(`${failures.length} failures:`)
+    for (const oc of failures) {
+      console.log(`%c --- ${oc.testcase}`, 'color: red')
 
-    const lines = oc.error.toString().split('\n');
-    for (const line of lines.slice(0, LINE_COUNT_LIMIT)) {
-      console.log('   | ' + line)
-    }
-    if (lines.length > LINE_COUNT_LIMIT) {
-      console.log('   | ...')
+      const lines = oc.error.toString().split('\n');
+      for (const line of lines.slice(0, LINE_COUNT_LIMIT)) {
+        console.log('   | ' + line)
+      }
+      if (lines.length > LINE_COUNT_LIMIT) {
+        console.log('   | ...')
+      }
     }
   }
 }

@@ -281,7 +281,7 @@ class VMFunction extends VMInvokable {
     invoke(vm, subject, args) {
         // do this substitution
         if (!this.isStrict) {
-            if (subject.type === 'undefined' || (subject.type === 'object' && subject.value === null))
+            if (subject.type === 'undefined' || subject.type === 'null')
                 subject = vm.globalObj;
             subject = vm.coerceToObject(subject);
         }
@@ -1351,18 +1351,14 @@ export class VM {
                 }
             }
 
-            if (type === 'number' || type === 'string' || type === 'boolean' || type === 'bigint') {
+            if (node.value === null) {
+                return { type: 'null' };
+            } else if (type === 'number' || type === 'string' || type === 'boolean' || type === 'bigint') {
                 assert(typeof value === type);
                 return { type, value };
 
-            } else if (type === 'object') {
-                if (node.value instanceof RegExp) {
-                    return createRegExpFromNative(node.value);
-
-                } else if (node.value === null) {
-                    return { type: 'object', value: null };
-                }
-
+            } else if (type === 'object' && node.value instanceof RegExp) {
+                return createRegExpFromNative(node.value);
             } else {
                 throw new VMError(`unsupported literal value: ${typeof node.value} ${Deno.inspect(node.value)}`);
             }
@@ -1379,10 +1375,10 @@ export class VM {
         const t = left.type;
 
         let value;
-        if (left.type === 'object' && left.value === null)
-            value = (right.type === 'object' && right.value === null);
-        else if (left instanceof VMObject)
+        if (left instanceof VMObject)
             value = Object.is(left, right);
+        else if (left.type === 'null')
+            value = (right.type === 'null');
         else if (t === 'boolean') value = (left.value === right.value);
         else if (t === 'string') value = (left.value === right.value);
         else if (t === 'number') value = (left.value === right.value);
@@ -1427,10 +1423,10 @@ export class VM {
             if (++counter === 3)
                 throw 'too many times!';
 
-            if (left.type === 'undefined' || (left.type === 'object' && left.value === null))
+            if (left.type === 'undefined' || left.type === 'null')
                 return {
                     type: 'boolean',
-                    value: right.type === 'undefined' || (right.type === 'object' && right.value === null),
+                    value: right.type === 'undefined' || right.type === 'null',
                 };
 
             if (left instanceof VMObject && right instanceof VMObject)
@@ -1556,7 +1552,7 @@ export class VM {
         assert (typeof value.value === value.type);
         if (value.type === 'number') return value.value;
         if (value.type === 'undefined') return NaN;
-        if (value.type === 'object' && value.value === null) return 0;
+        if (value.type === 'null') return 0;
         if (value.type === 'boolean') return value.value ? 1 : 0;
         if (value.type === 'string') return +value.value;
         if (value.type === 'bigint') return Number(value.value);
@@ -1572,7 +1568,6 @@ export class VM {
     }
 
     coerceToString(value) {
-        if (value.type === 'object' && value.value === null) return 'null';
 
         if (value instanceof VMObject) {
 
@@ -1588,7 +1583,8 @@ export class VM {
 
         assert(value.type === typeof value.value, `VM bug: invalid primitive value: ${value.type} / ${typeof value.value}`);
         let str;
-        if (value.type === 'string') str = value.value;
+        if (value.type === 'null') str = 'null';
+        else if (value.type === 'string') str = value.value;
         else if (value.type === 'undefined') str = 'undefined';
         else if (value.type === 'boolean') str = value.value ? 'true' : 'false';
         else if (value.type === 'number') str = Number.prototype.toString.call(value.value);
@@ -1666,8 +1662,7 @@ function createGlobalObject() {
     createSimpleErrorType('NameError')
 
     const consObject = nativeVMFunc((vm, subject, args) => {
-        if (subject.type === 'undefined'
-        || (subject.type === 'object' && subject.value === null)) {
+        if (subject.type === 'undefined' || subject.type === 'null') {
             return new VMObject();
         }
 

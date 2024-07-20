@@ -19,8 +19,6 @@ class VMError extends Error { }
 
 class ProgramException extends Error {
     constructor(exceptionValue, context) {
-        console.log(exceptionValue)
-
         let message;
         if (exceptionValue.type === 'string') {
             message = exceptionValue.value;
@@ -1226,6 +1224,108 @@ export class VM {
         },
 
         BinaryExpression(expr) {
+            const stringToBigInt = s => {
+                assert (typeof s === 'string');
+                console.log('stringToBigInt, s =', s)
+                
+                try { 
+                    const ret = BigInt(s);
+                    console.log('stringToBigInt, value =', ret)
+                    return ret;
+                }
+                catch(e) {
+                    console.log('stringToBigInt:', e);
+                    if (e instanceof SyntaxError) return undefined;
+                    console.log('stringToBigInt: rethrowing');
+                    throw e;
+                }
+            };
+            const isLessThan = (a, b) => {
+                // coercion of objects to primitives must be done by the caller,
+                // where the proper evaluation order is known
+                assert (!(a instanceof VMObject), "isLessThan: a must be primitive");
+                assert (!(b instanceof VMObject), "isLessThan: b must be primitive");
+
+                console.log('isLessThan', {a, b})
+
+                if (a.type === 'string' && b.type === 'string') {
+                    // we could use the host JS's builtins, but we want to get
+                    // close to the spec for a future translation
+                    const limit = Math.min(a.value.length, b.value.length);
+                    for (let i=0; i < limit; ++i) {
+                        const ac = a.value.codePointAt(i);
+                        const bc = b.value.codePointAt(i);
+                        if (ac < bc) return true;
+                        if (ac > bc) return false;
+                    }
+                    if (a.value.length < b.value.length) return true;
+                    return false;
+
+                } else if (a.type === 'bigint' && b.type === 'string') {
+                    const bb = stringToBigInt(b.value);
+                    if (bb === undefined) return undefined;
+                    console.log('isLessThan: bigint/string:', {
+                        aa: a.value,
+                        bb,
+                    })
+                    assert (typeof a.value === 'bigint');
+                    assert (typeof bb === 'bigint');
+                    return a.value < bb;
+                
+                } else if (a.type === 'string' && b.type === 'bigint') {
+                    const aa = stringToBigInt(a.value);
+                    if (aa === undefined) return undefined;
+                    console.log('isLessThan: string/bigint:', {
+                        aa,
+                        bb: b.value,
+                    })
+                    assert (typeof aa === 'bigint');
+                    assert (typeof b.value === 'bigint');
+                    return aa < b.value;
+                
+                } else {
+                    const an = this.coerceNumeric(a);
+                    const bn = this.coerceNumeric(b);
+
+                    assert (typeof an === 'number' || typeof an === 'bigint');
+                    assert (typeof bn === 'number' || typeof bn === 'bigint');
+
+                    if (typeof an === typeof bn) {
+                        // in JS these two branches looks the same, but a future
+                        // translation might have a different name for number
+                        // and bigint operations
+                        if (an.type === 'number')  return an.value < bn.value;
+                        return an.value < bn.value;
+                    }
+
+                    if (Number.isNaN(an) || Number.isNaN(bn)) return undefined;
+                    if (an === -Infinity || bn === +Infinity) return true;
+                    if (an === +Infinity || bn === -Infinity) return false;
+                    return an < by;
+                }
+
+                throw new VMError("unreachable code");
+            };
+
+            const arithmeticOp = (op) => {
+                const a = this.evalExpr(expr.left);
+                const b = this.evalExpr(expr.right);
+
+                if (a.type === 'number' && b.type === 'number') {
+                    const res = op(a, b);
+                    assert (typeof res === 'number');
+                    return {type: 'number', value: res};
+                    
+                } else if (a.type === 'bigint' && b.type === 'bigint') {
+                    const res = op(a, b);
+                    assert (typeof res === 'bigint');
+                    return {type: 'bigint', value: res};
+                
+                } else {
+                    this.throwError("TypeError", `invalid operands for arithmetic operation: ${a.type}, ${b.type}`);
+                }
+            };
+
             const numberOrStringOp = (implNumeric, implString) => {
                 const a = this.evalExpr(expr.left);
                 const b = this.evalExpr(expr.right);
@@ -1245,16 +1345,56 @@ export class VM {
                     return { type: rt, value: result };
                 }
 
-                // TODO coerce to numeric, handle bigint cases
-                const an = this.coerceToNumber(ap);
-                assert (typeof an === 'number');
-                const bn = this.coerceToNumber(bp);
-                assert (typeof bn === 'number');
-                
-                const result = implNumeric(an, bn);
+                let result;
+                if (ap.type === 'bigint' && bp.type === 'string') {
+                    const bb = this.coerceToBigInt(bp);
+                    assert (typeof bb === 'bigint');
+                    assert (typeof ap.value === 'bigint');
+                    result = implNumeric(ap.value, bb);
+                } else if (ap.type === 'bigint' && bp.type === 'string') {
+                    const ab = this.coerceToBigInt(ap);
+                    assert (typeof ab === 'bigint');
+                    assert (typeof bp.value === 'bigint');
+                    result = implNumeric(ab, bp.value);
+                } else {
+                    const an = this.coerceNumeric(ap);
+                    const bn = this.coerceNumeric(bp);
+
+                    if (ap.type === bp.type) {
+                        assert (typeof an === 'number' || typeof an === 'bigint');
+                        assert (typeof bn === 'number' || typeof bn === 'bigint');
+    
+                    }  
+
+                    console.log(`>> ${typeof an} comparison: `, {an, bn});
+
+                    result = implNumeric(an, bn);
+                }
                 const rt = typeof result;
-                assert(rt === 'number' || rt === 'boolean');
+                assert(rt === 'number' || rt === 'bigint' || rt === 'boolean');
+                console.log('.. result = ', {rt, result});
                 return { type: rt, value: result };
+            };
+
+            const isGreaterOrEqual = (a, b) => {
+                const ret = isLessThan(a, b);
+                console.log('isGreaterOrEqual: got from isLessThan:', ret);
+                // if (ret === undefined) ret = undefined;
+                console.log('isGreaterOrEqual =>', ret);
+                if (typeof ret === 'boolean') return !ret;
+                assert (typeof ret === 'undefined');
+                return undefined;
+            };
+
+            const doComparison = (left, right, op) => {
+                const a = this.evalExpr(left);
+                const b = this.evalExpr(right);
+                let res = op(a, b); 
+                console.log('doComparison: got from op:', res);
+                if (res === undefined) res = false;
+                assert (typeof res === 'boolean');
+                console.log('doComparison: returning: ', res);
+                return {type: 'boolean', value: res};
             };
 
             if (expr.operator === '===') {
@@ -1276,13 +1416,13 @@ export class VM {
                 return ret;
             }
             else if (expr.operator === '+')  { return numberOrStringOp((a, b) => a + b,  (a, b) => a + b); }
-            else if (expr.operator === '<')  { return numberOrStringOp((a, b) => a < b,  (a, b) => a < b); }
-            else if (expr.operator === '<=') { return numberOrStringOp((a, b) => a <= b, (a, b) => a <= b); }
-            else if (expr.operator === '>')  { return numberOrStringOp((a, b) => a > b,  (a, b) => a > b); }
-            else if (expr.operator === '>=') { return numberOrStringOp((a, b) => a >= b, (a, b) => a >= b); }
-            else if (expr.operator === '-')  { return numberOrStringOp((a, b) => a - b,  (a, b) => a - b); }
-            else if (expr.operator === '*')  { return numberOrStringOp((a, b) => a * b,  (a, b) => a * b); }
-            else if (expr.operator === '/')  { return numberOrStringOp((a, b) => a / b,  (a, b) => a / b); }
+            else if (expr.operator === '-')  { return arithmeticOp((a, b) => a - b); }
+            else if (expr.operator === '*')  { return arithmeticOp((a, b) => a * b); }
+            else if (expr.operator === '/')  { return arithmeticOp((a, b) => a / b); }
+            else if (expr.operator === '<')  { return doComparison(expr.left, expr.right, (a, b) => isLessThan(a, b)); }
+            else if (expr.operator === '<=') { return doComparison(expr.left, expr.right, (a, b) => isGreaterOrEqual(b, a)); }
+            else if (expr.operator === '>')  { return doComparison(expr.left, expr.right, (a, b) => isLessThan(b, a)); }
+            else if (expr.operator === '>=') { return doComparison(expr.left, expr.right, (a, b) => isGreaterOrEqual(a, b)); }
             else if (expr.operator === 'instanceof') {
                 const constructor = this.evalExpr(expr.right);
                 let obj = this.evalExpr(expr.left);
@@ -1457,8 +1597,9 @@ export class VM {
         return ret;
     }
     _looseEqual(left, right) {
+        console.log(' ---- loose equal');
+        
         /*
-
         If the operands have the same type, they are compared as follows:
             Object: return true only if both operands reference the same object.
             String: return true only if both operands have the same characters in the same order.
@@ -1476,13 +1617,21 @@ export class VM {
             Number to BigInt: compare by their numeric value. If the number is ±Infinity or NaN, return false.
             String to BigInt: convert the string to a BigInt using the same algorithm as the BigInt() constructor. If conversion fails, return false.
         */
+
+        let counter = 0;
         while(true) {
+            console.log('loop:', {
+                counter: ++counter,
+                left,
+                right,
+            });
             assert((left.type === 'object') === (left instanceof VMObject));
             assert(left instanceof VMObject || left.type === 'null' || left.type === typeof left.value);
             assert((right.type === 'object') === (right instanceof VMObject));
             assert(right instanceof VMObject || right.type === 'null' || right.type === typeof right.value, `invalid right value: ${right.type} / ${typeof right.value}`);
 
             if (left.type === right.type) {
+                console.log(' >> same type');
                 const t = left.type;
                 let result;
                 if (t === 'object') { result = Object.is(left, right); }
@@ -1652,7 +1801,7 @@ export class VM {
         let ret;
         if (value.type === 'number') ret = BigInt(value.value);
         else if (value.type === 'boolean') ret = BigInt(value.value ? 1 : 0);
-        else if (value.type === 'string') ret = BigInt(value.value);
+        else if (value.type === 'string') { ret = BigInt(value.value); }
         else if (value.type === 'bigint') ret = value.value;
         else throw new AssertionError('unreachable! invalid value type: ' + value.type); 
 

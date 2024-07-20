@@ -976,7 +976,7 @@ export class VM {
                 obj.setIndex(property.value, value);
 
             } else {
-                vm.throwTypeError("object property is neither number nor string, but " + property.type);
+                this.throwTypeError("object property is neither number nor string, but " + property.type);
             }
 
 
@@ -1284,6 +1284,7 @@ export class VM {
                     return aa < b.value;
                 
                 } else {
+                    console.log(`isLessThan: numeric (${a.type}/${b.type})`)
                     const an = this.coerceNumeric(a);
                     const bn = this.coerceNumeric(b);
 
@@ -1294,14 +1295,15 @@ export class VM {
                         // in JS these two branches looks the same, but a future
                         // translation might have a different name for number
                         // and bigint operations
-                        if (an.type === 'number')  return an.value < bn.value;
-                        return an.value < bn.value;
+                        if (typeof an === 'number') return an < bn;
+                        return an < bn;
                     }
 
                     if (Number.isNaN(an) || Number.isNaN(bn)) return undefined;
+                    console.log('bn =', bn);
                     if (an === -Infinity || bn === +Infinity) return true;
                     if (an === +Infinity || bn === -Infinity) return false;
-                    return an < by;
+                    return an < bn;
                 }
 
                 throw new VMError("unreachable code");

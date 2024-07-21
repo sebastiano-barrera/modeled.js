@@ -1318,8 +1318,8 @@ export class VM {
 
                     if (Number.isNaN(an) || Number.isNaN(bn)) return undefined;
                     console.log('bn =', bn);
-                    if (an === -Infinity || bn === +Infinity) return true;
-                    if (an === +Infinity || bn === -Infinity) return false;
+                    if (an === -Infinity) return (bn !== -Infinity);
+                    if (bn === +Infinity) return (an !== +Infinity);
                     return an < bn;
                 }
 
@@ -1447,8 +1447,11 @@ export class VM {
                 const a = this.coerceToPrimitive(this.evalExpr(expr.left));
                 const b = this.coerceToPrimitive(this.evalExpr(expr.right));
                 let ret = isLessThan(b, a);
+                console.log('<=: isLessThan returned', ret);
                 if (typeof ret === 'boolean') ret = !ret;
+                console.log('<=: negated:', ret);
                 assert(typeof ret === 'undefined' || typeof ret === 'boolean');
+                console.log('<=: returning:', Boolean(ret));
                 return {type: 'boolean', value: Boolean(ret)};
             }
             else if (expr.operator === '>') { 
@@ -1462,8 +1465,11 @@ export class VM {
                 const a = this.coerceToPrimitive(this.evalExpr(expr.left));
                 const b = this.coerceToPrimitive(this.evalExpr(expr.right));
                 let ret = isLessThan(a, b);
+                console.log('>=: isLessThan(a, b) returned', ret);
                 if (typeof ret === 'boolean') ret = !ret;
+                console.log('>=: negated', ret);
                 assert(typeof ret === 'undefined' || typeof ret === 'boolean');
+                console.log('>=: returning', Boolean(ret));
                 return {type: 'boolean', value: Boolean(ret)};
             }
             else if (expr.operator === 'instanceof') {

@@ -939,6 +939,10 @@ export class VM {
         if (type === 'boolean') { return value; }
         else if (type === 'string') { return value.length > 0; }
         else if (type === 'undefined') { return false; }
+        else if (type === 'number') {
+            if (Number.isNaN(value)) return false;
+            return value !== 0;
+        }
 
         throw new VMError('not yet implemented: isTruthy: ' + Deno.inspect(value));
     }
@@ -1224,6 +1228,7 @@ export class VM {
         },
 
         BinaryExpression(expr) {
+            console.log(' ----- bin expr', expr.operator)
             const stringToBigInt = s => {
                 assert (typeof s === 'string');
                 console.log('stringToBigInt, s =', s)
@@ -1295,7 +1300,6 @@ export class VM {
                         // in JS these two branches looks the same, but a future
                         // translation might have a different name for number
                         // and bigint operations
-                        if (typeof an === 'number') return an < bn;
                         return an < bn;
                     }
 
@@ -1335,10 +1339,11 @@ export class VM {
                 const ap = this.coerceToPrimitive(a, 'valueOf first');
                 const bp = this.coerceToPrimitive(b, 'valueOf first');
 
-                if (ap.type === 'string' && bp.type === 'string') {
-                    const as = ap.value, bs = bp.value;
-                    assert(typeof as === 'string', 'coerceToString bug (a)');
-                    assert(typeof bs === 'string', 'coerceToString bug (b)');
+                if (ap.type === 'string' || bp.type === 'string') {
+                    const as = this.coerceToString(ap);
+                    const bs = this.coerceToString(bp);
+                    assert(typeof as === 'string', 'invalid value (as)');
+                    assert(typeof bs === 'string', 'invalid value (bs)');
 
                     const result = implString(as, bs);
 
@@ -1368,8 +1373,7 @@ export class VM {
     
                     }  
 
-                    console.log(`>> ${typeof an} comparison: `, {an, bn});
-
+                    console.log(`>> operation on ${typeof an}:`, {an, bn});
                     result = implNumeric(an, bn);
                 }
                 const rt = typeof result;
@@ -1388,15 +1392,13 @@ export class VM {
                 return undefined;
             };
 
-            const doComparison = (left, right, op) => {
-                const a = this.evalExpr(left);
-                const b = this.evalExpr(right);
-                let res = op(a, b); 
-                console.log('doComparison: got from op:', res);
-                if (res === undefined) res = false;
-                assert (typeof res === 'boolean');
-                console.log('doComparison: returning: ', res);
-                return {type: 'boolean', value: res};
+            const negateU = (x) => {
+                if (typeof x === 'boolean') return !x;
+                return false;  // undefined is always false
+            };
+            const wrapV = x => {
+                assert (typeof x === 'boolean');
+                return {type: 'boolean', value};
             };
 
             if (expr.operator === '===') {
@@ -1421,16 +1423,42 @@ export class VM {
             else if (expr.operator === '-')  { return arithmeticOp((a, b) => a - b); }
             else if (expr.operator === '*')  { return arithmeticOp((a, b) => a * b); }
             else if (expr.operator === '/')  { return arithmeticOp((a, b) => a / b); }
-            else if (expr.operator === '<')  { return doComparison(expr.left, expr.right, (a, b) => isLessThan(a, b)); }
-            else if (expr.operator === '<=') { return doComparison(expr.left, expr.right, (a, b) => isGreaterOrEqual(b, a)); }
-            else if (expr.operator === '>')  { return doComparison(expr.left, expr.right, (a, b) => isLessThan(b, a)); }
-            else if (expr.operator === '>=') { return doComparison(expr.left, expr.right, (a, b) => isGreaterOrEqual(a, b)); }
+            else if (expr.operator === '<') { 
+                const a = this.coerceToPrimitive(this.evalExpr(expr.left));
+                const b = this.coerceToPrimitive(this.evalExpr(expr.right));
+                let ret = isLessThan(a, b);
+                assert(typeof ret === 'undefined' || typeof ret === 'boolean');
+                return {type: 'boolean', value: Boolean(ret)};
+            }
+            else if (expr.operator === '<=') { 
+                const a = this.coerceToPrimitive(this.evalExpr(expr.left));
+                const b = this.coerceToPrimitive(this.evalExpr(expr.right));
+                let ret = isLessThan(b, a);
+                if (typeof ret === 'boolean') ret = !ret;
+                assert(typeof ret === 'undefined' || typeof ret === 'boolean');
+                return {type: 'boolean', value: Boolean(ret)};
+            }
+            else if (expr.operator === '>') { 
+                const a = this.coerceToPrimitive(this.evalExpr(expr.left));
+                const b = this.coerceToPrimitive(this.evalExpr(expr.right));
+                let ret = isLessThan(b, a);
+                assert(typeof ret === 'undefined' || typeof ret === 'boolean');
+                return {type: 'boolean', value: Boolean(ret)};
+            }
+            else if (expr.operator === '>=') { 
+                const a = this.coerceToPrimitive(this.evalExpr(expr.left));
+                const b = this.coerceToPrimitive(this.evalExpr(expr.right));
+                let ret = isLessThan(a, b);
+                if (typeof ret === 'boolean') ret = !ret;
+                assert(typeof ret === 'undefined' || typeof ret === 'boolean');
+                return {type: 'boolean', value: Boolean(ret)};
+            }
             else if (expr.operator === 'instanceof') {
                 const constructor = this.evalExpr(expr.right);
                 let obj = this.evalExpr(expr.left);
                 for (; obj !== null; obj = obj.proto) {
                     const check = obj.getProperty('constructor');
-                    if (!check instanceof VMObject) continue;
+                    if (!(check instanceof VMObject)) continue;
                     if (check.is(constructor))
                         return { type: 'boolean', value: true };
                 }
@@ -1744,6 +1772,7 @@ export class VM {
                 }
             }
 
+            this.throwError("TypeError", "value can't be converted to a primitive");
             return { type: 'undefined' };
 
         } else {

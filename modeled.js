@@ -1314,12 +1314,7 @@ export class VM {
                     assert (typeof an === 'number' || typeof an === 'bigint');
                     assert (typeof bn === 'number' || typeof bn === 'bigint');
 
-                    if (typeof an === typeof bn) {
-                        // in JS these two branches looks the same, but a future
-                        // translation might have a different name for number
-                        // and bigint operations
-                        return an < bn;
-                    }
+                    console.log('isLessThan: coerced numeric', {an, bn})
 
                     if (Number.isNaN(an) || Number.isNaN(bn)) return undefined;
                     console.log('bn =', bn);

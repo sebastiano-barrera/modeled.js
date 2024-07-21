@@ -1212,6 +1212,12 @@ export class VM {
                 assert(typeof value === 'boolean');
                 return {type: 'boolean', value: !value};
 
+            } else if (expr.operator === '+') {
+                const value = this.coerceNumeric(this.evalExpr(expr.argument));
+                if (typeof value !== 'number' && typeof value !== 'bigint')
+                    return {type: "undefined"};
+                return {type: typeof value, value: value};
+
             } else if (expr.operator === '-') {
                 const value = this.coerceNumeric(this.evalExpr(expr.argument));
                 assert(typeof value === 'number' || typeof value === 'bigint');

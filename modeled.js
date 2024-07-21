@@ -67,10 +67,13 @@ class VMObject {
         }
         return descriptor.value;
     }
-    getOwnPropertyDescriptor(name) { return this.descriptors.get(name); }
+    getOwnPropertyDescriptor(name) {
+        assert(typeof name === 'string' || typeof name === 'symbol');
+        return this.descriptors.get(name);
+    }
     getOwnPropertyNames() { return this.descriptors.keys() }
     getOwnProperty(name, vm = undefined) {
-        assert(typeof name === 'string');
+        assert(typeof name === 'string' || typeof name === 'symbol');
 
         const descriptor = this.getOwnPropertyDescriptor(name);
         if (descriptor === undefined) return { type: 'undefined' };
@@ -78,11 +81,11 @@ class VMObject {
         return this.resolveDescriptor(descriptor, vm);
     }
     hasOwnProperty(name) {
-        assert(typeof name === 'string');
+        assert(typeof name === 'string' || typeof name === 'symbol');
         return this.descriptors.has(name);
     }
     getProperty(name, vm = undefined) {
-        assert(typeof name === 'string');
+        assert(typeof name === 'string' || typeof name === 'symbol');
 
         let object = this;
         let descriptor;
@@ -97,7 +100,7 @@ class VMObject {
         return this.resolveDescriptor(descriptor, vm);
     }
     setProperty(name, value, vm) {
-        assert(typeof name === 'string');
+        assert(typeof name === 'string' || typeof name === 'symbol');
         assert(typeof value.type === 'string');
 
         let descriptor;
@@ -110,12 +113,13 @@ class VMObject {
         // TODO Honor writable, configurable, etc.
         if (descriptor === undefined) {
             assert(!this.descriptors.has(name));
-            return this.descriptors.set(name, {
+            this.descriptors.set(name, {
                 value,
                 configurable: true,
                 writable: true,
                 enumerable: true,
-            })
+            });
+            return;
         }
 
         if (descriptor.set) {
@@ -126,7 +130,7 @@ class VMObject {
         }
     }
     defineProperty(name, descriptor) {
-        assert(typeof name === 'string');
+        assert(typeof name === 'string' || typeof name === 'symbol');
         // descriptorValue is a VM value
         assert(typeof descriptor === 'object', 'VM bug: descriptor is not an object')
 
@@ -153,7 +157,7 @@ class VMObject {
         this.descriptors.set(name, descriptor);
     }
     deleteProperty(name) {
-        assert(typeof name === 'string');
+        assert(typeof name === 'string' || typeof name === 'symbol');
         return this.descriptors.delete(name);
     }
 
@@ -973,14 +977,22 @@ export class VM {
                 property = { type: 'string', value: propertyName };
             }
 
-            if (property.type === 'string') {
-                obj.setProperty(property.value, value, this);
-
-            } else if (property.type === 'number') {
+            if (property.type === 'number') {
                 obj.setIndex(property.value, value);
 
             } else {
-                this.throwTypeError("object property is neither number nor string, but " + property.type);
+                if (!(property.type === 'string' || property.type === 'symbol')) {
+                    property = this.coerceToString(property);
+                } else {
+                    property = property.value;
+                }
+
+                assert (
+                    typeof property === 'string' || typeof property === 'symbol',
+                    `property key should have been converted to string or symbol (instead it's ${typeof property})`
+                );
+
+                obj.setProperty(property, value, this);
             }
 
 
@@ -1618,6 +1630,7 @@ export class VM {
         else if (t === 'string')    value = (left.value === right.value);
         else if (t === 'number')    value = (left.value === right.value);
         else if (t === 'bigint')    value = (left.value === right.value);
+        else if (t === 'symbol')    value = (left.value === right.value);
         else if (t === 'undefined') value = true;
         else { throw new VMError('invalid value type: ' + t); }
 
@@ -1760,21 +1773,25 @@ export class VM {
 
     coerceToPrimitive(value, order = 'valueOf first') {
         if (value instanceof VMObject) {
+            const symToPrimitive = this.globalObj.getProperty('Symbol').getProperty('toPrimitive');
+            assert (symToPrimitive.type === 'symbol');
+            assert (typeof symToPrimitive.value === 'symbol');
+
             let methods;
-                 if (order === 'valueOf first')  methods = ['valueOf', 'toString'];
-            else if (order === 'toString first') methods = ['toString', 'valueOf'];
+                 if (order === 'valueOf first')  methods = [symToPrimitive.value, 'valueOf', 'toString'];
+            else if (order === 'toString first') methods = [symToPrimitive.value, 'toString', 'valueOf'];
             else throw new VMError('invalid value for arg "order": ' + order);
 
             for (const methodName of methods) {
                 const method = value.getProperty(methodName);
                 if (method instanceof VMInvokable) {
-                    console.log(`invoking object's ${methodName}`)
+                    console.log(`invoking object's ${methodName.toString()}`)
                     const ret = method.invoke(this, value, []);
                     // primitive: can be used
                     if (ret.type !== 'object' && ret.type !== 'undefined')
                         return ret;
                 } else {
-                    console.log(`object has no method named ${methodName}`)
+                    console.log(`object has no method named ${methodName.toString()}`)
                 }
             }
 
@@ -1847,9 +1864,7 @@ export class VM {
     }
  
     coerceToString(value) {
-
         if (value instanceof VMObject) {
-
             // Objects are first converted to a primitive by calling its [Symbol.toPrimitive]() (with "string" as hint), toString(), and valueOf() methods, in that order. The resulting primitive is then converted to a string.
             const prim = this.coerceToPrimitive(value, 'toString first');
             if (prim.type === 'undefined') {
@@ -2103,6 +2118,9 @@ function createGlobalObject() {
 
 
     const consSymbol = addPrimitiveWrapperConstructor("Symbol", PROTO_SYMBOL, 'symbol', 'coerceToSymbol');
+    // we import some well-known symbols from the host JS
+    // TODO stop doing this; define our own Symbol representation and our own well-defined symbols
+    consSymbol.setProperty('toPrimitive', {type: 'symbol', value: Symbol.toPrimitive});
 
     const consArray = nativeVMFunc((vm, subject, args) => {
         assert(subject.type === 'object', 'Only supported invoking via new Array()');

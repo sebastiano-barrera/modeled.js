@@ -2026,14 +2026,12 @@ function createGlobalObject() {
             return subject;
         }
 
-        if (subject.type === 'undefined') {
-            subject = args[0] || {type: 'undefined'};
-        }
-        if (subject.type === 'undefined' || subject.type === 'null') {
+        let arg = args[0] || {type: 'undefined'};
+        if (arg.type === 'undefined' || arg.type === 'null') {
             return new VMObject();
         }
 
-        return vm.coerceToObject(subject);
+        return vm.coerceToObject(arg);
     });
     consObject.setProperty('prototype', PROTO_OBJECT);
     consObject.setProperty('defineProperty', nativeVMFunc((vm, subject, args) => {

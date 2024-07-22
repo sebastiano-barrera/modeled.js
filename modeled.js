@@ -1425,12 +1425,14 @@ export class VM {
                 return {type: 'boolean', value: !ret};
             }
             else if (expr.operator === '==') {
-                return this.looseEqual(expr.left, expr.right);
+                const ret = this.looseEqual(expr.left, expr.right);
+                assert(typeof ret === 'boolean', 'looseEqual did not return boolean (==)');
+                return {type: "boolean", value: ret};
             }
             else if (expr.operator === '!=') {
                 const ret = this.looseEqual(expr.left, expr.right);
-                ret.value = !ret.value;
-                return ret;
+                assert(typeof ret === 'boolean', 'looseEqual did not return boolean (!=)');
+                return {type: "boolean", value: !ret};
             }
             else if (expr.operator === '+')  { return numberOrStringOp((a, b) => a + b,  (a, b) => a + b); }
             else if (expr.operator === '-')  { return arithmeticOp((a, b) => a - b); }
@@ -1642,9 +1644,7 @@ export class VM {
     looseEqual(left, right) {
         left = this.evalExpr(left);
         right = this.evalExpr(right);
-        const ret = this._looseEqual(left, right);
-        if (!ret.value) console.log('loose unequal', {left, right});
-        return ret;
+        return this._looseEqual(left, right);
     }
     _looseEqual(left, right) {
         console.log(' ---- loose equal');
@@ -1695,13 +1695,16 @@ export class VM {
                 ) { result = left.value === right.value; }
                 else { throw new AssertionError('invalid value type: ' + left.type); }
 
-                return { type: 'boolean', value: result };
+                assert (typeof result === 'boolean');
+                return result;
             }
 
             const leftIsUN = (left.type === 'undefined' || left.type === 'null');
             const rightIsUN = (right.type === 'undefined' || right.type === 'null');
-            if (leftIsUN || rightIsUN)
-                return { type: 'boolean', value: leftIsUN && rightIsUN };
+            if (leftIsUN || rightIsUN) {
+                assert (typeof result === 'boolean');
+                return leftIsUN && rightIsUN;
+            }
 
             if (left instanceof VMObject && !(right instanceof VMObject)) {
                 left = this.coerceToPrimitive(left);
@@ -1719,7 +1722,7 @@ export class VM {
 
             // If one of the operands is a Symbol but the other is not, return false.
             if ((left.type === 'symbol') !== (right.type === 'symbol')) {
-                return {type: 'boolean', value: false};
+                return false;
             }
 
             // If one of the operands is a Boolean but the other is not,
@@ -1753,18 +1756,26 @@ export class VM {
                 (left.type === 'number' && right.type === 'bigint')
                 || (left.type === 'bigint' && right.type === 'number')
             ) {
-                return {type: 'boolean', value: left.value == right.value};
+                const value = left.value == right.value;
+                assert (typeof value === 'boolean');
+                return value;
             }
 
             // String to BigInt: convert the string to a BigInt using the
             // same algorithm as the BigInt() constructor. If conversion
             // fails, return false.
             else if (left.type === 'string' && right.type === 'bigint') {
-                left = { type: 'bigint', value: this.coerceToBigInt(left) };
+                const value = this.coerceToBigInt(left);
+                if (typeof value === 'undefined') return false;
+                assert (typeof value === 'bigint');
+                left = { type: 'bigint', value };
                 continue;
             }
             else if (left.type === 'bigint' && right.type === 'string') {
-                right = { type: 'bigint', value: this.coerceToBigInt(right) };
+                const value = this.coerceToBigInt(right);
+                if (typeof value === 'undefined') return false;
+                assert (typeof value === 'bigint');
+                right = { type: 'bigint', value };
                 continue;
             }
 
@@ -1856,11 +1867,17 @@ export class VM {
         let ret;
         if (value.type === 'number') ret = BigInt(value.value);
         else if (value.type === 'boolean') ret = BigInt(value.value ? 1 : 0);
-        else if (value.type === 'string') { ret = BigInt(value.value); }
+        else if (value.type === 'string') {
+            try { ret = BigInt(value.value);  }
+            catch (e) {
+                if (e instanceof SyntaxError) ret = undefined;
+                else throw e;
+            }
+        }
         else if (value.type === 'bigint') ret = value.value;
         else throw new AssertionError('unreachable! invalid value type: ' + value.type); 
 
-        assert (typeof ret === 'bigint');
+        assert (typeof ret === 'bigint' || typeof ret === 'undefined');
         return ret;
     }
  
@@ -2130,6 +2147,7 @@ function createGlobalObject() {
     G.setProperty('Array', consArray);
     consArray.setProperty('isArray', nativeVMFunc((vm, subject, args) => {
         const value = subject instanceof VMArray;
+        assert (typeof value === 'boolean');
         return { type: 'boolean', value };
     }));
     consArray.setProperty('prototype', PROTO_ARRAY)

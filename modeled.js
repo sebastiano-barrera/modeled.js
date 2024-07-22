@@ -224,15 +224,23 @@ class VMInvokable extends VMObject {
 
     run() { throw new AssertionError('invoke not implemented'); }
 
-    invoke(vm, subject, args) {
-        // do this substitution
-        if (!this.isStrict) {
-            if (subject.type === 'undefined' || subject.type === 'null')
-                subject = vm.globalObj;
-            subject = vm.coerceToObject(subject);
+    invoke(vm, subject, args, options = {}) {
+        // true iff this invocation comes from new Constructor(...)
+        const isNew = options.isNew || false;
+        assert (typeof isNew === 'boolean');
+        
+        if (!isNew) {
+            // do this substitution
+            if (!this.isStrict) {
+                console.log('this-substitution: not new, non strict');
+                if (subject.type === 'undefined' || subject.type === 'null')
+                    subject = vm.globalObj;
+                subject = vm.coerceToObject(subject);
+            }
         }
 
         return vm.withScope(() => {
+            vm.currentScope.isNew = isNew;
             vm.currentScope.this = subject;
             assert(this.isStrict || subject instanceof VMObject);
             vm.currentScope.isCallWrapper = true;
@@ -616,6 +624,12 @@ export class VM {
         }
     }
 
+    get currentCallWrapper() {
+        return this.currentScope.walkParents(scope => {
+            if (scope.isCallWrapper) return scope;
+        })
+    }
+
     #unsupportedNode(node) {
         throw new VMError('unsupported node: ' + Deno.inspect(node));
     }
@@ -968,7 +982,8 @@ export class VM {
 
     performNew(constructor, args) {
         const initObj = new VMObject();
-        let obj = this.performCall(constructor, initObj, args);
+        
+        let obj = constructor.invoke(this, initObj, args, {isNew: true});
         if (obj.type === 'undefined') obj = initObj;
 
         assert(obj instanceof VMObject, 'vm bug: invalid return type from constructor: ' + Deno.inspect(obj));
@@ -1035,6 +1050,7 @@ export class VM {
 
         // weird stupid case. why is BigInt not a constructor?
         if (value.type === 'bigint') {
+            console.log('wrapping bigint in BigInt object')
             const obj = new VMObject(PROTO_BIGINT);
             assert (typeof value.value === 'bigint');
             obj.primitive = value.value;
@@ -2004,12 +2020,15 @@ function createGlobalObject() {
     createSimpleErrorType('NameError')
 
     const consObject = nativeVMFunc((vm, subject, args) => {
-        if (subject instanceof VMObject) {
+        assert (typeof vm.currentCallWrapper.isNew === 'boolean');
+        if (vm.currentCallWrapper.isNew) {
             // when called via new, subject is already a freshly created object. sufficient to be returned from this constructor
             return subject;
         }
 
-        if (subject.type === 'undefined') subject = args[0] || {type: 'undefined'};
+        if (subject.type === 'undefined') {
+            subject = args[0] || {type: 'undefined'};
+        }
         if (subject.type === 'undefined' || subject.type === 'null') {
             return new VMObject();
         }
@@ -2113,7 +2132,8 @@ function createGlobalObject() {
 
     function addPrimitiveWrapperConstructor(name, prototype, primType, coercerName) {
         const cons = nativeVMFunc((vm, subject, args) => {
-            const prim = vm[coercerName](args[0]);
+            const arg = args[0] === undefined ? {type: 'undefined'} : args[0];
+            const prim = vm[coercerName](arg);
             assert(typeof(prim) === primType, `coercer returned <${typeof prim}>, expected <${primType}>`);
 
             if (subject instanceof VMObject) {

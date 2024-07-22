@@ -139,7 +139,7 @@ class VMObject {
                 const val = descriptor[key];
                 assert(
                     val === undefined || val.type === 'undefined' || val instanceof VMInvokable,
-                    `invalid descriptor: '${key}' is not a function`
+                    `invalid descriptor: '${key}' is not a JS function nor undefined: ` + Deno.inspect(val)
                 );
     
             }
@@ -180,12 +180,16 @@ class VMArray extends VMObject {
     constructor() {
         super(PROTO_ARRAY);
         this.arrayElements = []
-    }
 
-    getOwnProperty(name, vm = undefined) {
-        if (name === 'length')
-            return { type: 'number', value: this.arrayElements.length };
-        return super.getOwnProperty(name, vm);
+        super.defineProperty('length', {
+            get: nativeVMFunc((vm, subject, args) => {
+                assert (subject instanceof VMArray);
+                return {type: "number", value: subject.arrayElements.length};
+            }),
+            writable: false,
+            configurable: false,
+            enumerable: false,
+        })
     }
 
     getIndex(index) {
@@ -218,7 +222,45 @@ class VMInvokable extends VMObject {
         this.setProperty('prototype', new VMObject());
     }
 
-    invoke() { throw new AssertionError('invoke not implemented'); }
+    run() { throw new AssertionError('invoke not implemented'); }
+
+    invoke(vm, subject, args) {
+        // do this substitution
+        if (!this.isStrict) {
+            if (subject.type === 'undefined' || subject.type === 'null')
+                subject = vm.globalObj;
+            subject = vm.coerceToObject(subject);
+        }
+
+        return vm.withScope(() => {
+            vm.currentScope.this = subject;
+            assert(this.isStrict || subject instanceof VMObject);
+            vm.currentScope.isCallWrapper = true;
+            vm.currentScope.isSetStrict = this.isStrict;
+
+            // not all subclass have named params
+            if (this.params !== undefined) {
+                while (args.length < this.params.length) {
+                    args.push({type: "undefined"});
+                }
+
+                for (const ndx in this.params) {
+                    const name = this.params[ndx];
+                    const value = args[ndx];
+                    assert (value !== undefined);
+                    vm.defineVar('var', name, value);
+                }    
+            }
+
+            const argumentsArray = new VMArray()
+            argumentsArray.arrayElements.push(...args);
+
+            vm.defineVar('var', 'arguments', argumentsArray);
+
+            // another scope, to allow redefinitions
+            return vm.withScope(() => this.run(vm, subject, args))
+        })
+    }
 }
 
 PROTO_FUNCTION.setProperty('bind', nativeVMFunc((vm, outerInvokable, args) => {
@@ -297,44 +339,17 @@ class VMFunction extends VMInvokable {
     get isStrict() { return this.#isStrict; }
     setStrict() { this.#isStrict = true; }
 
-    invoke(vm, subject, args) {
-        // do this substitution
-        if (!this.isStrict) {
-            if (subject.type === 'undefined' || subject.type === 'null')
-                subject = vm.globalObj;
-            subject = vm.coerceToObject(subject);
+    run(vm, subject, args) {
+        try { vm.runStmt(this.body) }
+        catch (e) {
+            if (e.returnValue) {
+                assert(typeof e.returnValue.type === 'string', "return value uninitialized!");
+                return e.returnValue;
+            }
+            throw e;
         }
 
-        return vm.withScope(() => {
-            vm.currentScope.this = subject;
-            assert(this.isStrict || subject instanceof VMObject);
-            vm.currentScope.isCallWrapper = true;
-            vm.currentScope.isSetStrict = this.isStrict;
-
-            const argumentsArray = new VMArray()
-
-            for (const ndx in this.params) {
-                const name = this.params[ndx];
-                const value = args[ndx] || { type: 'undefined' };
-                vm.defineVar('var', name, value);
-                argumentsArray.arrayElements.push(value);
-            }
-
-            vm.defineVar('var', 'arguments', argumentsArray);
-
-            return vm.withScope(() => {
-                try { vm.runStmt(this.body) }
-                catch (e) {
-                    if (e.returnValue) {
-                        assert(typeof e.returnValue.type === 'string', "return value uninitialized!");
-                        return e.returnValue;
-                    }
-                    throw e;
-                }
-
-                return { type: "undefined" }
-            })
-        })
+        return { type: "undefined" }
     }
 }
 
@@ -1585,6 +1600,10 @@ export class VM {
             if (value === undefined)
                 this.throwError('ReferenceError', 'unbound variable: ' + node.name);
 
+            if (node.name === 'arguments') {
+                console.log('expression Identifier "arguments" resolved to:', value)
+            }
+
             return value;
         },
 
@@ -1702,7 +1721,6 @@ export class VM {
             const leftIsUN = (left.type === 'undefined' || left.type === 'null');
             const rightIsUN = (right.type === 'undefined' || right.type === 'null');
             if (leftIsUN || rightIsUN) {
-                assert (typeof result === 'boolean');
                 return leftIsUN && rightIsUN;
             }
 
@@ -1789,26 +1807,36 @@ export class VM {
             assert (symToPrimitive.type === 'symbol');
             assert (typeof symToPrimitive.value === 'symbol');
 
-            let methods;
-                 if (order === 'valueOf first')  methods = [symToPrimitive.value, 'valueOf', 'toString'];
-            else if (order === 'toString first') methods = [symToPrimitive.value, 'toString', 'valueOf'];
-            else throw new VMError('invalid value for arg "order": ' + order);
+            let ret;
 
-            for (const methodName of methods) {
+            const tryCall = (methodName, args) => {
+                if (ret !== undefined) return;
+                
                 const method = value.getProperty(methodName);
                 if (method instanceof VMInvokable) {
                     console.log(`invoking object's ${methodName.toString()}`)
-                    const ret = method.invoke(this, value, []);
+                    ret = method.invoke(this, value, args);
                     // primitive: can be used
                     if (ret.type !== 'object' && ret.type !== 'undefined')
                         return ret;
                 } else {
                     console.log(`object has no method named ${methodName.toString()}`)
                 }
-            }
+            };
 
-            this.throwError("TypeError", "value can't be converted to a primitive");
-            return { type: 'undefined' };
+            tryCall(symToPrimitive.value, [{type: "string", value: "default"}]);
+            if (order === 'valueOf first') {
+                tryCall('valueOf', []);
+                tryCall('toString', []);
+            }
+            else if (order === 'toString first') {
+                tryCall('toString', []);
+                tryCall('valueOf', []);
+            }
+            else throw new VMError('invalid value for arg "order": ' + order);
+
+            if (ret !== undefined) return ret;
+            else this.throwError("TypeError", "value can't be converted to a primitive");
 
         } else {
             assert(typeof value.type === 'string', 'invalid value');
@@ -1915,7 +1943,7 @@ export class VM {
 function nativeVMFunc(innerImpl) {
     return new class extends VMInvokable {
         // in innerImpl, `this` is the VMInvokable object
-        invoke = innerImpl
+        run = innerImpl
     }
 }
 

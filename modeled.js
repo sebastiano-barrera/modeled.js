@@ -1823,18 +1823,18 @@ export class VM {
             assert (symToPrimitive.type === 'symbol');
             assert (typeof symToPrimitive.value === 'symbol');
 
-            let ret;
+            let prim;
 
             const tryCall = (methodName, args) => {
-                if (ret !== undefined) return;
+                if (prim !== undefined) return;
                 
                 const method = value.getProperty(methodName);
                 if (method instanceof VMInvokable) {
                     console.log(`invoking object's ${methodName.toString()}`)
-                    ret = method.invoke(this, value, args);
+                    const ret = method.invoke(this, value, args);
                     // primitive: can be used
                     if (ret.type !== 'object' && ret.type !== 'undefined')
-                        return ret;
+                        prim = ret;
                 } else {
                     console.log(`object has no method named ${methodName.toString()}`)
                 }
@@ -1851,7 +1851,7 @@ export class VM {
             }
             else throw new VMError('invalid value for arg "order": ' + order);
 
-            if (ret !== undefined) return ret;
+            if (prim !== undefined) return prim;
             else this.throwError("TypeError", "value can't be converted to a primitive");
 
         } else {

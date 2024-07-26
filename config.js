@@ -1,12 +1,6 @@
 import fullTestConfig from './fullTestConfig.json' with {type: 'json'};
 
-const predicate = path => 
-  path.startsWith('test/language/expressions/does-not-equals/')
-  || path.startsWith('test/language/expressions/equals/')
-  || path.startsWith('test/language/expressions/greater-than-or-equal/')
-  || path.startsWith('test/language/expressions/less-than-or-equal/')
-  || path.startsWith('test/language/expressions/strict-does-not-equals/')
-  || path.startsWith('test/language/expressions/strict-equals/');
+const predicate = path => path.startsWith('test/language/statements/');
 
 const prob = 0.4
 

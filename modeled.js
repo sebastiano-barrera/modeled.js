@@ -246,7 +246,7 @@ class VMInvokable extends VMObject {
             vm.currentScope.isCallWrapper = true;
             vm.currentScope.isSetStrict = this.isStrict;
 
-            // not all subclass have named params
+            // not all subclasses have named params
             if (this.params !== undefined) {
                 while (args.length < this.params.length) {
                     args.push({type: "undefined"});
@@ -339,7 +339,6 @@ class VMFunction extends VMInvokable {
         super();
         this.params = params;
         this.body = body;
-        this.parentScope = null;
         this.name = null;
         this.functionID = ++VMFunction.#lastID;
     }
@@ -944,7 +943,6 @@ export class VM {
 
         assert(body.type === 'BlockStatement', "only supported: BlockStatement as function body");
         const func = new VMFunction(params, body);
-        func.parentScope = this.currentScope;
         if (!options.scopeStrictnessIrrelevant && this.currentScope.isStrict())
             func.setStrict();
 
@@ -2004,13 +2002,13 @@ function createGlobalObject() {
     function createSimpleErrorType(name) {
         const Error = G.getOwnProperty('Error');
         const parentProto = Error.getProperty('prototype');
-        const constructor = new class extends VMInvokable {
-            constructor() { super(parentProto); }
-            invoke(vm, subject, args) { return Error.invoke(vm, subject, args); }
-        }
-        constructor.getOwnProperty('prototype').setProperty('name', { type: 'string', value: name });
+        const proto = new VMObject(parentProto)
+        proto.setProperty('name', { type: 'string', value: name });
 
-        G.setProperty(name, constructor);
+        G.setProperty(name, new class extends VMInvokable {
+            constructor() { super(proto); }
+            invoke(vm, subject, args) { return Error.invoke(vm, subject, args); }
+        });
     }
 
     createSimpleErrorType('TypeError')

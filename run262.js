@@ -1,4 +1,4 @@
-import * as Modeled from './modeled.js'
+import * as Modeled from './modeled.ts'
 import testConfig from './testConfig.json' with {type: 'json'};
 
 import { parseArgs as parseArgsGeneric } from "https://deno.land/std@0.224.0/cli/parse_args.ts";

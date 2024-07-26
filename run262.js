@@ -7,6 +7,10 @@ import * as YAML from "@std/yaml";
 
 class CliError extends Error {}
 
+class SkippedTest {
+  constructor(message) { this.message = message }
+}
+
 
 let args;
 try {
@@ -29,24 +33,36 @@ if (args.single) {
 
 } else {
   const successes = []
+  const skips = []
   const failures = []
 
   for (let path of testConfig.testCases) {
     path = path.startsWith('/') ? path : (test262Root + '/' + path);
-    const outcomes = await runTest262Case(test262Root, path);
+    try {
+      const outcomes = await runTest262Case(test262Root, path);
 
-    for (const oc of outcomes) { 
-      oc.testcase = path;
-      if (oc.outcome === 'success')
-        successes.push(oc);
-      else
-        failures.push(oc);
+      for (const oc of outcomes) { 
+        oc.testcase = path;
+        if (oc.outcome === 'success')
+          successes.push(oc);
+        else
+          failures.push(oc);
+      }
+    } catch (e) {
+      if (e instanceof SkippedTest) {
+        skips.push({ path, message: e.message });
+      } else throw e;
     }
   }
 
   console.log(`${successes.length} successes:`)
   for (const oc of successes) {
     console.log(`%c - ${oc.testcase}`, 'color: green')
+  }
+  
+  console.log(`${skips.length} skipped:`)
+  for (const {path, message} of skips) {
+    console.log(`%c - ${path}: ${message}`, 'color: yellow')
   }
   
   const LINE_COUNT_LIMIT = 20
@@ -69,6 +85,11 @@ if (args.single) {
       }
     }
   }
+
+  console.log(
+    `summary: %c${successes.length} successes; %c${skips.length} skipped; %c${failures.length} failures`,
+    'color: green', 'color: yellow', 'color: red'
+  )
 }
 
 
@@ -83,9 +104,7 @@ async function runTest262Case(test262Root, path) {
     for (const flag of metadata.flags) {
       if (flag === 'onlyStrict') { runSloppy = false; }
       else if (flag === 'noStrict') { runStrict = false; }
-      else {
-        throw 'unknown flag: ' + flag;
-      }
+      else { throw new SkippedTest('unknown flag: ' + flag); }
     }
   }
 

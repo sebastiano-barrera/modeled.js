@@ -771,6 +771,16 @@ func createGlobalObject() (G JSObject) {
 		},
 	)
 
+	addPrimitiveWrapperConstructor(
+		&G, "Number", &ProtoNumber,
+		func(vm *VM, jsv JSValue) (JSNumber, error) {
+			return vm.coerceToNumber(jsv)
+		},
+		func(obj *JSObject, jsn JSNumber) {
+			obj.primNumber = jsn
+		},
+	)
+
 	cashPrint := NewNativeFunction(
 		[]string{"value"},
 		func(vm *VM, subject JSValue, args []JSValue, flags CallFlags) (JSValue, error) {

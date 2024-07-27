@@ -180,6 +180,10 @@ func (jso *JSObject) SetProperty(name Name, value JSValue, vm *VM) error {
 
 	// TODO Honor writable, configurable, etc.
 	if !isThere {
+		if value == nil {
+			panic("value can't be nil here")
+		}
+
 		jso.descriptors[name] = &Descriptor{
 			value:        value,
 			configurable: false,
@@ -1081,6 +1085,9 @@ func (vm *VM) evalExpr(expr ast.Expression) (value JSValue, err error) {
 				return nil, err
 			}
 			value, err = addition(vm, prevValue, value)
+			if err != nil {
+				return nil, err
+			}
 
 		default:
 			err = fmt.Errorf("unsupported/unimplemented assignment operator: %s", expr.Operator)
@@ -1910,6 +1917,8 @@ func (vm *VM) strictEqual(left, right JSValue) bool {
 }
 
 func (vm *VM) looseEqual(a, b JSValue) (ret bool, err error) {
+	aOrig := a
+	bOrig := b
 	/*
 		If the operands have the same type, they are compared as follows:
 			Object: return true only if both operands reference the same object.
@@ -1984,17 +1993,17 @@ func (vm *VM) looseEqual(a, b JSValue) (ret bool, err error) {
 		}
 		if isBBool {
 			if bBool {
-				a = JSNumber(1.0)
+				b = JSNumber(1.0)
 			} else {
-				a = JSNumber(0.0)
+				b = JSNumber(0.0)
 			}
 			continue
 		}
 
 		_, isAStr := a.(JSString)
-		_, isBStr := a.(JSString)
+		_, isBStr := b.(JSString)
 		_, isANum := a.(JSNumber)
-		_, isBNum := a.(JSNumber)
+		_, isBNum := b.(JSNumber)
 		if isAStr && isBNum {
 			a, err = vm.coerceToNumber(a)
 			continue
@@ -2004,8 +2013,23 @@ func (vm *VM) looseEqual(a, b JSValue) (ret bool, err error) {
 			continue
 		}
 
-		_, isABigInt := a.(JSBigInt)
-		_, isBBigInt := a.(JSBigInt)
+		if isAStr && isBNum {
+			a, err = vm.coerceToNumber(a)
+			if err != nil {
+				return false, nil
+			}
+			continue
+		}
+		if isANum && isBStr {
+			b, err = vm.coerceToNumber(b)
+			if err != nil {
+				return false, nil
+			}
+			continue
+		}
+
+		ai, isABigInt := a.(JSBigInt)
+		bi, isBBigInt := b.(JSBigInt)
 		if isAStr && isBBigInt {
 			a, err = vm.coerceToBigInt(a)
 			continue
@@ -2015,7 +2039,22 @@ func (vm *VM) looseEqual(a, b JSValue) (ret bool, err error) {
 			continue
 		}
 
-		panic("unreachable!")
+		if isANum && isBBigInt {
+			b = JSNumber(float64(int64(bi)))
+			continue
+		}
+		if isABigInt && isBNum {
+			a = JSNumber(float64(int64(ai)))
+			continue
+		}
+
+		msg := fmt.Sprintf("unreachable! looseEqual called with %s (->%s) / %s (->%s)",
+			reflect.TypeOf(aOrig),
+			reflect.TypeOf(a),
+			reflect.TypeOf(bOrig),
+			reflect.TypeOf(b),
+		)
+		panic(msg)
 	}
 
 	panic("bug: looseEqual iterated too many times!")

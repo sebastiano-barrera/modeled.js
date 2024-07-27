@@ -2,6 +2,7 @@ package modeledjs
 
 import (
 	"fmt"
+	"io"
 	"math"
 	"os"
 	"reflect"
@@ -90,11 +91,14 @@ type JSObject struct {
 }
 
 type FunctionPart struct {
-	isStrict bool
-	native   NativeCallback
-	params   []string
-	body     ast.Statement
-	file     *parserFile.File
+	isStrict     bool
+	native       NativeCallback
+	params       []string
+	body         ast.Statement
+	lexicalScope *Scope
+
+	file *parserFile.File
+	name string
 }
 type NativeCallback func(vm *VM, subject JSValue, args []JSValue, flags CallFlags) (JSValue, error)
 type CallFlags struct {
@@ -244,6 +248,7 @@ func NewNativeFunction(paramNames []string, cb NativeCallback) JSObject {
 			params:   paramNames,
 			body:     nil,
 			file:     nil,
+			name:     "",
 		},
 	}
 }
@@ -267,11 +272,19 @@ func (callee *JSObject) Invoke(vm *VM, this JSValue, args []JSValue, flags CallF
 		}
 	}
 
+	saveScope := vm.curScope
+	vm.curScope = fp.lexicalScope
+	defer func() { vm.curScope = saveScope }()
+
 	ret = JSUndefined{}
 	vm.withScope(func() {
-		vm.curScope.this = this
-		vm.curScope.call = &ScopeCall{}
+		vm.curScope.call = &ScopeCall{this: this}
 		vm.curScope.isSetStrict = fp.isStrict
+
+		// the function's name is not overridable within the function itself
+		if fp.name != "" {
+			vm.curScope.env.defineVar(vm.curScope, DeclVar, NameStr(fp.name), callee)
+		}
 
 		if fp.file != nil {
 			vm.synCtx.PushFile(fp.file)
@@ -366,6 +379,107 @@ func init() {
 		return JSBoolean(ret), nil
 	})
 	ProtoObject.SetProperty(NameStr("hasOwnProperty"), &object_hasOwnProperty, nil)
+
+	function_bind := NewNativeFunction([]string{"forcedThis"}, func(vm *VM, subject JSValue, args []JSValue, flags CallFlags) (JSValue, error) {
+		outerInvokable, err := vm.coerceToObject(subject)
+		if err != nil {
+			return nil, err
+		}
+		if outerInvokable.funcPart != nil {
+			return nil, vm.ThrowError("TypeError", "Function.prototype.bind: `this` is not invokable")
+		}
+
+		var forcedThis JSValue
+		if len(args) == 0 {
+			forcedThis = JSUndefined{}
+		} else {
+			forcedThis = args[0]
+		}
+
+		wrapper := NewNativeFunction(outerInvokable.funcPart.params, func(vm *VM, subject JSValue, args []JSValue, flags CallFlags) (JSValue, error) {
+			return outerInvokable.Invoke(vm, forcedThis, args, CallFlags{})
+		})
+		return &wrapper, nil
+	})
+	ProtoFunction.SetProperty(NameStr("bind"), &function_bind, nil)
+
+	function_call := NewNativeFunction([]string{"forcedThis"}, func(vm *VM, subject JSValue, args []JSValue, flags CallFlags) (JSValue, error) {
+		outerInvokable, err := vm.coerceToObject(subject)
+		if err != nil {
+			return nil, err
+		}
+		if outerInvokable.funcPart != nil {
+			return nil, vm.ThrowError("TypeError", "Function.prototype.bind: `this` is not invokable")
+		}
+
+		var forcedThis JSValue
+		if len(args) == 0 {
+			forcedThis = JSUndefined{}
+		} else {
+			forcedThis = args[0]
+			args = args[1:]
+		}
+
+		return outerInvokable.Invoke(vm, forcedThis, args, CallFlags{})
+	})
+	ProtoFunction.SetProperty(NameStr("call"), &function_call, nil)
+
+	function_apply := NewNativeFunction([]string{"forcedThis", "args"}, func(vm *VM, subject JSValue, args []JSValue, flags CallFlags) (JSValue, error) {
+		outerInvokable, err := vm.coerceToObject(subject)
+		if err != nil {
+			return nil, err
+		}
+		if outerInvokable.funcPart != nil {
+			return nil, vm.ThrowError("TypeError", "Function.prototype.bind: `this` is not invokable")
+		}
+
+		var forcedThis JSValue = JSUndefined{}
+		var argsArray []JSValue = nil
+
+		if len(args) >= 1 {
+			forcedThis = args[0]
+		}
+		if len(args) >= 2 {
+			argsArrayObj, err := vm.coerceToObject(args[1])
+			if err != nil {
+				return nil, err
+			}
+			argsArray = argsArrayObj.arrayPart
+		}
+
+		return outerInvokable.Invoke(vm, forcedThis, argsArray, CallFlags{})
+	})
+	ProtoFunction.SetProperty(NameStr("apply"), &function_apply, nil)
+
+	function_toString := NewNativeFunction(nil, func(vm *VM, subject JSValue, _ []JSValue, _ CallFlags) (JSValue, error) {
+		subjectObj, err := vm.coerceToObject(subject)
+		if err != nil {
+			return nil, err
+		}
+
+		fp := subjectObj.funcPart
+		if fp == nil {
+			return nil, vm.ThrowError("TypeError", "Function.prototype.toString: 'this' is not a function")
+		}
+
+		var s string
+		if fp.native != nil {
+			s = "[Function <native>]"
+		} else if pos := fp.file.Position(fp.body.Idx0()); pos != nil {
+			s = fmt.Sprintf(
+				"[Function %s:%d:%d]",
+				pos.Filename,
+				pos.Line,
+				pos.Column,
+			)
+		} else {
+			s = "[Function JS <unknown pos>]"
+		}
+
+		return JSString(s), nil
+	})
+	ProtoObject.SetProperty(NameStr("toString"), &function_toString, nil)
+
 }
 
 type VMError error
@@ -500,7 +614,6 @@ type Scope struct {
 	env         Environment
 	vars        map[Name]JSValue
 	doNotDelete map[Name]struct{}
-	this        JSValue
 
 	// non-nil iff this scope is a function call's "wrapper" scope.
 	//  - each function has at least 2 nested scopes:
@@ -511,6 +624,7 @@ type Scope struct {
 }
 
 type ScopeCall struct {
+	this JSValue
 }
 
 func isStrict(s *Scope) (ret bool) {
@@ -520,13 +634,6 @@ func isStrict(s *Scope) (ret bool) {
 		}
 	}
 	return false
-}
-
-func getRoot(s *Scope) *Scope {
-	for s.parent != nil {
-		s = s.parent
-	}
-	return s
 }
 
 func newScope(env Environment) (ret Scope) {
@@ -650,6 +757,29 @@ func createGlobalObject() (G JSObject) {
 		},
 	)
 
+	addPrimitiveWrapperConstructor(
+		&G, "Boolean", &ProtoBoolean,
+		func(vm *VM, jsv JSValue) (JSBoolean, error) {
+			return vm.coerceToBoolean(jsv), nil
+		},
+		func(obj *JSObject, jsb JSBoolean) {
+			obj.primBoolean = jsb
+		},
+	)
+
+	cashPrint := NewNativeFunction(
+		[]string{"value"},
+		func(vm *VM, subject JSValue, args []JSValue, flags CallFlags) (JSValue, error) {
+			var arg JSValue = JSUndefined{}
+			if len(args) > 0 {
+				arg = args[0]
+			}
+			fmt.Printf("$print: %#+v\n", arg)
+			return JSUndefined{}, nil
+		},
+	)
+	G.SetProperty(NameStr("$print"), &cashPrint, nil)
+
 	return
 }
 
@@ -699,10 +829,6 @@ func (vm *VM) withScope(action func()) {
 	vm.curScope = saveScope
 }
 
-func unsupportedNode(node ast.Node) {
-	panic(fmt.Sprintf("unsupported node: %v", node))
-}
-
 func (vm *VM) RunScriptFile(path, text string) error {
 	f, err := os.Open(path)
 	if err != nil {
@@ -710,9 +836,21 @@ func (vm *VM) RunScriptFile(path, text string) error {
 	}
 	defer f.Close()
 
+	return vm.RunScriptReader(path, f)
+}
+
+func (vm *VM) RunScriptReader(path string, f io.Reader) error {
 	program, err := parser.ParseFile(nil, path, f, 0)
 	if err != nil {
 		return err
+	}
+
+	// NOTE This avoids a corner case that is not correctly managed by the parser library
+	// program.Idx0() would panic
+	if len(program.Body) == 0 {
+		program.Body = []ast.Statement{
+			&ast.EmptyStatement{},
+		}
 	}
 
 	vm.synCtx.PushFile(program.File)
@@ -854,10 +992,22 @@ func (vm *VM) runStmt(stmt ast.Statement) (err error) {
 		return err
 
 	default:
-		unsupportedNode(stmt)
+		return fmt.Errorf("unsupported node: %#v", stmt)
 	}
 
 	return nil
+}
+
+type BreakSignal struct{ label string }
+
+func (sigb BreakSignal) Error() string {
+	return "[break:" + sigb.label + "]"
+}
+
+type ContinueSignal struct{ label string }
+
+func (sigc ContinueSignal) Error() string {
+	return "[continue '" + sigc.label + "]"
 }
 
 func defineFunction(vm *VM, literal ast.FunctionLiteral) (fnp *JSObject, err error) {
@@ -875,6 +1025,8 @@ func defineFunction(vm *VM, literal ast.FunctionLiteral) (fnp *JSObject, err err
 
 	if literal.Name != nil {
 		nameStr := literal.Name.Name
+		fnp.funcPart.name = nameStr
+
 		err = fn.SetProperty(NameStr("name"), JSString(nameStr), vm)
 		if err == nil {
 			vm.curScope.env.defineVar(vm.curScope, DeclVar, NameStr(nameStr), fnp)
@@ -897,11 +1049,12 @@ func (vm *VM) makeFunction(params *ast.ParameterList, body ast.Statement, opts F
 	fn = NewJSObject(&ProtoFunction)
 	blockBody, isBlock := body.(*ast.BlockStatement)
 	fn.funcPart = &FunctionPart{
-		isStrict: (isStrict(vm.curScope) && !opts.noInheritStrict) || (isBlock && hasUseStrict(blockBody.List)),
-		native:   nil,
-		params:   paramNames,
-		body:     body,
-		file:     vm.synCtx.fileStack[len(vm.synCtx.fileStack)-1],
+		isStrict:     (isStrict(vm.curScope) && !opts.noInheritStrict) || (isBlock && hasUseStrict(blockBody.List)),
+		native:       nil,
+		params:       paramNames,
+		lexicalScope: vm.curScope,
+		body:         body,
+		file:         vm.synCtx.fileStack[len(vm.synCtx.fileStack)-1],
 	}
 	return
 }
@@ -920,7 +1073,15 @@ func (vm *VM) evalExpr(expr ast.Expression) (value JSValue, err error) {
 		switch expr.Operator {
 		case token.ASSIGN:
 			// nothing, we're done
-		// case token.ADD_ASSIGN:
+
+		case token.PLUS:
+			var prevValue JSValue
+			prevValue, err = vm.evalExpr(expr.Left)
+			if err != nil {
+				return nil, err
+			}
+			value, err = addition(vm, prevValue, value)
+
 		default:
 			err = fmt.Errorf("unsupported/unimplemented assignment operator: %s", expr.Operator)
 			return
@@ -1260,12 +1421,98 @@ func (vm *VM) evalExpr(expr ast.Expression) (value JSValue, err error) {
 			return nil, vm.ThrowError("SyntaxError", "unsupported unary expression: "+expr.Operator.String())
 		}
 
-	// case *ast.BracketExpression:
-	// case *ast.ConditionalExpression:
-	// case *ast.EmptyExpression:
-	// case *ast.NewExpression:
-	// case *ast.SequenceExpression:
-	// case *ast.ThisExpression:
+	case *ast.BracketExpression:
+		left, err := vm.evalExpr(expr.Left)
+		if err != nil {
+			return nil, err
+		}
+
+		leftObj, err := vm.coerceToObject(left)
+		if err != nil {
+			return nil, err
+		}
+
+		member, err := vm.evalExpr(expr.Member)
+		if err != nil {
+			return nil, err
+		}
+
+		switch key := member.(type) {
+		case JSNumber:
+			index := uint(key)
+			return leftObj.GetIndex(index)
+		case JSBigInt:
+			index := uint(key)
+			return leftObj.GetIndex(index)
+		case JSString:
+			return leftObj.GetProperty(NameStr(string(key)), vm)
+		default:
+			msg := fmt.Sprintf("invalid type for object key: %s", reflect.TypeOf(member).String())
+			return nil, vm.ThrowError("TypeError", msg)
+		}
+
+	case *ast.ConditionalExpression:
+		test, err := vm.evalExpr(expr.Test)
+		if err != nil {
+			return nil, err
+		}
+
+		if vm.coerceToBoolean(test) {
+			value, err = vm.evalExpr(expr.Consequent)
+		} else {
+			value, err = vm.evalExpr(expr.Alternate)
+		}
+		return value, err
+
+	case *ast.EmptyExpression:
+		return JSUndefined{}, nil
+
+	case *ast.NewExpression:
+		cons, err := vm.evalExpr(expr.Callee)
+		if err != nil {
+			return nil, err
+		}
+
+		consObj, err := vm.coerceToObject(cons)
+		if err != nil {
+			return nil, err
+		}
+
+		args := make([]JSValue, len(expr.ArgumentList))
+		for i, argExpr := range expr.ArgumentList {
+			args[i], err = vm.evalExpr(argExpr)
+			if err != nil {
+				return nil, err
+			}
+		}
+
+		initObj := NewJSObject(&ProtoObject)
+		value, err = consObj.Invoke(vm, &initObj, args, CallFlags{isNew: true})
+		if err != nil {
+			return nil, err
+		}
+
+		if _, isUnd := value.(JSUndefined); isUnd {
+			value = &initObj
+		}
+		return value, nil
+
+	case *ast.SequenceExpression:
+		for _, item := range expr.Sequence {
+			value, err = vm.evalExpr(item)
+			if err != nil {
+				break
+			}
+		}
+		return
+
+	case *ast.ThisExpression:
+		var scope *Scope = currentCall(vm.curScope)
+		if scope == nil {
+			return &vm.globalObject, nil
+		}
+		return scope.call.this, nil
+
 	case *ast.VariableExpression:
 		if expr.Initializer == nil {
 			value = JSUndefined{}
@@ -1303,8 +1550,15 @@ func (vm *VM) evalExpr(expr ast.Expression) (value JSValue, err error) {
 		// includes *ast.BadExpression
 		panic(fmt.Sprintf("unexpected ast.Expression: %#v", expr))
 	}
+}
 
-	panic("unreachable")
+func currentCall(scope *Scope) *Scope {
+	for ; scope != nil; scope = scope.parent {
+		if scope.call != nil {
+			return scope
+		}
+	}
+	return scope
 }
 
 func addition(vm *VM, left, right JSValue) (res JSValue, err error) {
@@ -1404,6 +1658,9 @@ func arithmeticOp(vm *VM, l, r JSValue, op token.Token) (res JSValue, err error)
 		case token.OR:
 			return li | ri, nil
 		case token.SLASH:
+			if ri == 0 {
+				return JSNumber(math.Inf(+1)), nil
+			}
 			return li / ri, nil
 		case token.REMAINDER:
 			return li % ri, nil
@@ -1890,8 +2147,7 @@ func (vm *VM) coerceToPrimitive(value JSValue, order PrimCoerceOrder) (prim JSVa
 		return nil, vm.ThrowError("TypeError", "value can't be converted to a primitive")
 
 	default:
-		prim = value
-		return
+		return value, nil
 	}
 
 }
@@ -1928,7 +2184,7 @@ func (vm *VM) coerceToString(val JSValue) (ret JSString, err error) {
 		return vm.coerceToString(prim)
 
 	default:
-		panic("bug: invalid type for coerceToString operand")
+		panic("bug: invalid type for coerceToString operand: " + reflect.TypeOf(val).String())
 	}
 }
 

@@ -2,12 +2,14 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
 	"log"
 	"os"
 	"path"
+	"strings"
 
 	// "com.github.sebastianobarrera.modeledjs/modeledjs"
 
@@ -50,8 +52,117 @@ func main() {
 		errStrict, errSloppy := runTestCase(*test262Root, *testCase)
 		log.Println("strict:", errStrict)
 		log.Println("sloppy:", errSloppy)
+	} else {
+		testConfig, err := readTestConfig("testConfig.json")
+		if err != nil {
+			log.Fatalf("while parsing testConfig.json: %s", err)
+		}
+
+		result := runMany(*test262Root, testConfig.TestCases)
+
+		successesCount := 0
+		failuresCount := 0
+		for _, co := range result.Cases {
+			if co.Success {
+				successesCount++
+			} else {
+				failuresCount++
+			}
+		}
+
+		successes := make([]CaseOutcome, 0, successesCount)
+		failures := make([]CaseOutcome, 0, failuresCount)
+		for _, co := range result.Cases {
+			if co.Success {
+				successes = append(successes, co)
+			} else {
+				failures = append(failures, co)
+			}
+		}
+
+		fmt.Printf("%d SUCCESSES:\n", successesCount)
+		for _, co := range successes {
+			strictMode := "sloppy"
+			if co.StrictMode {
+				strictMode = "strict"
+			}
+			fmt.Printf("  - %s (%s)\n", co.Path, strictMode)
+		}
+
+		fmt.Printf("\n%d FAILURES:\n", failuresCount)
+		for _, co := range failures {
+			strictMode := "sloppy"
+			if co.StrictMode {
+				strictMode = "strict"
+			}
+
+			fmt.Printf("\t- %s (%s)\n", co.Path, strictMode)
+
+			var errLines []string
+			if co.Error != nil {
+				errLines = strings.Split(co.Error.Error(), "\n")
+			}
+			for ndx, line := range errLines {
+				if ndx == 0 {
+					fmt.Printf("\t|\tERROR: %s\n", line)
+				} else {
+					fmt.Printf("\t|\t%s\n", line)
+				}
+			}
+		}
+
+		fmt.Printf("\n\n total: %d; %d successes; %d failures", len(result.Cases), successesCount, failuresCount)
+
+	}
+}
+
+type TestConfig struct {
+	TestCases []string `json:"testCases"`
+}
+
+func readTestConfig(filename string) (cfg TestConfig, err error) {
+	buf, err := os.ReadFile(filename)
+	if err != nil {
+		return
 	}
 
+	err = json.Unmarshal(buf, &cfg)
+	return
+}
+
+type RunManyResult struct {
+	Cases []CaseOutcome
+}
+
+type CaseOutcome struct {
+	Path       string
+	StrictMode bool
+
+	Success bool
+	Error   error
+}
+
+func runMany(test262Root string, testCases []string) (result RunManyResult) {
+	result.Cases = make([]CaseOutcome, 0, len(testCases)*2)
+
+	for _, relPath := range testCases {
+		errStrict, errSloppy := runTestCase(test262Root, relPath)
+
+		result.Cases = append(result.Cases, CaseOutcome{
+			Path:       relPath,
+			StrictMode: true,
+			Success:    (errStrict == nil),
+			Error:      errStrict,
+		})
+		result.Cases = append(result.Cases, CaseOutcome{
+			Path:       relPath,
+			StrictMode: false,
+			Success:    (errSloppy == nil),
+			Error:      errSloppy,
+		})
+	}
+
+	return
 }
 
 func runTestCase(test262Root, testCase string) (errStrict, errSloppy error) {
@@ -69,11 +180,14 @@ func runTestCase(test262Root, testCase string) (errStrict, errSloppy error) {
 
 	mt, err := parseMetadata(textBytes)
 	if err != nil {
-		err = fmt.Errorf("while parsing metadata: %w", err)
+		errStrict = fmt.Errorf("while parsing metadata: %w", err)
+		errSloppy = errStrict
+		return
 	}
-	log.Printf("metadata = %#v", mt)
 
 	runInMode := func(forceStrict bool) (err error) {
+		log.Printf("running %s (strict: %v)", testCase, forceStrict)
+
 		vm := modeledjs.NewVM()
 
 		includes := make([]string, 2+len(mt.Includes))
@@ -94,7 +208,8 @@ func runTestCase(test262Root, testCase string) (errStrict, errSloppy error) {
 		if forceStrict {
 			effectiveText = "\"use strict\";" + text
 		}
-		return vm.RunScriptFile(testCase, effectiveText)
+		rdr := bytes.NewReader([]byte(effectiveText))
+		return vm.RunScriptReader(testCaseAbs, rdr)
 	}
 
 	if mt.NoStrict {
@@ -123,7 +238,7 @@ func parseMetadata(text []byte) (mt Metadata, err error) {
 		return
 	}
 
-	endNdx := bytes.Index(text[startNdx:], []byte("---*/"))
+	endNdx := startNdx + bytes.Index(text[startNdx:], []byte("---*/"))
 	if endNdx == -1 {
 		err = fmt.Errorf("invalid source code: unterminated metadata comment (started with /*--- at offset %d)", startNdx)
 		return

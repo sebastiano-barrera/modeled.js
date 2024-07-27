@@ -1,8 +1,8 @@
 import fullTestConfig from './fullTestConfig.json' with {type: 'json'};
 
-const predicate = path => path.startsWith('test/language/statements/');
+const predicate = path => path.startsWith('test/language/');
 
-const prob = 0.4
+const prob = 1.0
 
 const filteredTestCases = []
 console.log(fullTestConfig)

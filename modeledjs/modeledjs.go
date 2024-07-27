@@ -1565,7 +1565,8 @@ func (vm *VM) evalExpr(expr ast.Expression) (value JSValue, err error) {
 
 	default:
 		// includes *ast.BadExpression
-		panic(fmt.Sprintf("unexpected ast.Expression: %#v", expr))
+		msg := fmt.Sprintf("unsupported expression node: %#v", expr)
+		return nil, vm.ThrowError("SyntaxError", msg)
 	}
 }
 

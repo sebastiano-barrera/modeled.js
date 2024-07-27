@@ -2,8 +2,10 @@ package modeledjs
 
 import (
 	"fmt"
+	"math"
 	"os"
 	"reflect"
+	"strconv"
 
 	"github.com/robertkrimen/otto/ast"
 	parserFile "github.com/robertkrimen/otto/file"
@@ -74,7 +76,7 @@ func NameStr(s string) Name {
 
 type JSObject struct {
 	Prototype   *JSObject
-	descriptors map[Name]Descriptor
+	descriptors map[Name]*Descriptor
 
 	// at any given time, only one of these is supposed to be set
 	// replace all these with a single interface pointer and type assertions
@@ -115,11 +117,11 @@ func (v *JSObject) Category() JSVCategory {
 func NewJSObject(proto *JSObject) JSObject {
 	return JSObject{
 		Prototype:   proto,
-		descriptors: make(map[Name]Descriptor),
+		descriptors: make(map[Name]*Descriptor),
 	}
 }
 
-func (this *JSObject) resolveDescriptor(descriptor *Descriptor, vm *VM) (retVal JSValue, err error) {
+func (jso *JSObject) resolveDescriptor(descriptor *Descriptor, vm *VM) (retVal JSValue, err error) {
 	if descriptor.get == nil {
 		retVal = descriptor.value
 		return
@@ -127,48 +129,43 @@ func (this *JSObject) resolveDescriptor(descriptor *Descriptor, vm *VM) (retVal 
 	if vm == nil {
 		panic("bug: looking up described value but vm not passed")
 	}
-	return descriptor.get.Invoke(vm, this, []JSValue{}, CallFlags{})
+	return descriptor.get.Invoke(vm, jso, []JSValue{}, CallFlags{})
 }
-func (this *JSObject) getOwnPropertyDescriptor(name Name) (Descriptor, bool) {
+func (jso *JSObject) getOwnPropertyDescriptor(name Name) (*Descriptor, bool) {
 	// TODO Return a pointer?
-	d, ok := this.descriptors[name]
+	d, ok := jso.descriptors[name]
 	return d, ok
 }
-func (this *JSObject) getOwnPropertyNames(action func(name Name)) {
-	for name := range this.descriptors {
-		action(name)
-	}
-}
-func (this *JSObject) GetOwnProperty(name Name, vm *VM) (JSValue, error) {
-	descriptor, isThere := this.descriptors[name]
+func (jso *JSObject) GetOwnProperty(name Name, vm *VM) (JSValue, error) {
+	descriptor, isThere := jso.descriptors[name]
 	if !isThere {
 		return JSUndefined{}, nil
 	}
-	return this.resolveDescriptor(&descriptor, vm)
+	return jso.resolveDescriptor(descriptor, vm)
 }
-func (this *JSObject) HasOwnProperty(name Name) bool {
-	_, isThere := this.descriptors[name]
+func (jso *JSObject) HasOwnProperty(name Name) bool {
+	_, isThere := jso.descriptors[name]
 	return isThere
 }
-func (this *JSObject) GetProperty(name Name, vm *VM) (JSValue, error) {
-	object := this
+func (jso *JSObject) GetProperty(name Name, vm *VM) (JSValue, error) {
+	object := jso
 	for {
 		if object == nil {
 			return JSUndefined{}, nil
 		}
 		descriptor, isThere := object.getOwnPropertyDescriptor(name)
 		if isThere {
-			return this.resolveDescriptor(&descriptor, vm)
+			return jso.resolveDescriptor(descriptor, vm)
 		}
 		object = object.Prototype
 	}
 
 }
-func (this *JSObject) SetProperty(name Name, value JSValue, vm *VM) error {
-	var descriptor Descriptor
+func (jso *JSObject) SetProperty(name Name, value JSValue, vm *VM) error {
+	var descriptor *Descriptor
 	isThere := false
 
-	for object := this; object != nil; object = object.Prototype {
+	for object := jso; object != nil; object = object.Prototype {
 		descriptor, isThere = object.getOwnPropertyDescriptor(name)
 		if isThere {
 			break
@@ -177,50 +174,58 @@ func (this *JSObject) SetProperty(name Name, value JSValue, vm *VM) error {
 
 	// TODO Honor writable, configurable, etc.
 	if !isThere {
-		descriptor = Descriptor{
+		jso.descriptors[name] = &Descriptor{
 			value:        value,
 			configurable: false,
 			enumerable:   false,
 			writable:     false,
 		}
+		return nil
 	} else if descriptor.set != nil {
-		_, err := descriptor.set.Invoke(vm, this, []JSValue{value}, CallFlags{})
+		_, err := descriptor.set.Invoke(vm, jso, []JSValue{value}, CallFlags{})
 		// descriptor used but remains unchanged
 		return err
 	} else {
 		descriptor.value = value
+		return nil
 	}
-
-	// descriptor has been created/changed
-	this.descriptors[name] = descriptor
-	return nil
 }
-func (this *JSObject) DefineProperty(name Name, descriptor Descriptor) {
+func (jso *JSObject) getOrDefineProperty(name Name) (ds *Descriptor) {
+	ds, isThere := jso.getOwnPropertyDescriptor(name)
+	if !isThere {
+		ds = jso.DefineProperty(name, Descriptor{value: JSUndefined{}})
+	}
+	return
+}
+
+func (jso *JSObject) DefineProperty(name Name, descriptor Descriptor) *Descriptor {
 	descriptor.writable = true
 	descriptor.configurable = true
 	descriptor.enumerable = true
-	this.descriptors[name] = descriptor
+	dp := &descriptor
+	jso.descriptors[name] = dp
+	return dp
 }
-func (this *JSObject) DeleteProperty(name Name) bool {
-	_, wasThere := this.descriptors[name]
-	delete(this.descriptors, name)
+func (jso *JSObject) DeleteProperty(name Name) bool {
+	_, wasThere := jso.descriptors[name]
+	delete(jso.descriptors, name)
 	return wasThere
 }
-func (this *JSObject) GetIndex(ndx uint) (JSValue, error) {
-	if this.arrayPart != nil {
-		return this.arrayPart[ndx], nil
+func (jso *JSObject) GetIndex(ndx uint) (JSValue, error) {
+	if jso.arrayPart != nil {
+		return jso.arrayPart[ndx], nil
 	} else {
-		return this.GetProperty(NameStr(string(ndx)), nil)
+		return jso.GetProperty(NameStr(string(ndx)), nil)
 	}
 }
-func (this *JSObject) SetIndex(ndx int, value JSValue) {
-	if this.arrayPart != nil {
-		for len(this.arrayPart) < ndx+1 {
-			this.arrayPart = append(this.arrayPart, JSUndefined{})
+func (jso *JSObject) SetIndex(ndx int, value JSValue) {
+	if jso.arrayPart != nil {
+		for len(jso.arrayPart) < ndx+1 {
+			jso.arrayPart = append(jso.arrayPart, JSUndefined{})
 		}
-		this.arrayPart[ndx] = value
+		jso.arrayPart[ndx] = value
 	} else {
-		err := this.SetProperty(NameStr(string(ndx)), value, nil)
+		err := jso.SetProperty(NameStr(string(ndx)), value, nil)
 		if err != nil {
 			panic("bug: error in SetIndex")
 		}
@@ -230,7 +235,7 @@ func (this *JSObject) SetIndex(ndx int, value JSValue) {
 func NewNativeFunction(paramNames []string, cb NativeCallback) JSObject {
 	return JSObject{
 		Prototype:   &ProtoFunction,
-		descriptors: make(map[Name]Descriptor),
+		descriptors: make(map[Name]*Descriptor),
 		funcPart: &FunctionPart{
 			isStrict: true,
 			native:   cb,
@@ -281,7 +286,7 @@ func (callee *JSObject) Invoke(vm *VM, this JSValue, args []JSValue, flags CallF
 		argsArray.arrayPart = make([]JSValue, len(args))
 		copy(argsArray.arrayPart, args)
 
-		vm.curScope.env.defineVar(vm.curScope, DeclVar, NameStr("arguments"), &argsArray)
+		vm.curScope.env.defineVar(vm.curScope, DeclVar, NameStr("arguments"), argsArray)
 
 		vm.WithScope(func() {
 			if fp.native != nil {
@@ -303,18 +308,14 @@ func (callee *JSObject) Invoke(vm *VM, this JSValue, args []JSValue, flags CallF
 	return
 }
 
-// TODO Delete if this does not help ensure we do comparison by pointer
-func (this *JSObject) Is(other *JSObject) bool {
-	return this == other
-}
-
-func NewJSArray() (obj JSObject) {
-	obj = NewJSObject(&ProtoArray)
+func NewJSArray() (obj *JSObject) {
+	obj = new(JSObject)
+	*obj = NewJSObject(&ProtoArray)
 	obj.arrayPart = make([]JSValue, 0, 8)
 	return
 }
 
-type JSBigInt uint64
+type JSBigInt int64
 
 func (v JSBigInt) Category() JSVCategory { return VBigInt }
 
@@ -376,46 +377,46 @@ type ContextItem struct {
 	node       ast.Node
 }
 
-func (this *ProgramContext) PushFile(file *parserFile.File) {
-	this.fileStack = append(this.fileStack, file)
+func (pctx *ProgramContext) PushFile(file *parserFile.File) {
+	pctx.fileStack = append(pctx.fileStack, file)
 }
-func (this *ProgramContext) PopFile(check *parserFile.File) {
-	sl := len(this.fileStack)
+func (pctx *ProgramContext) PopFile(check *parserFile.File) {
+	sl := len(pctx.fileStack)
 	if sl == 0 {
 		panic("bug: ProgramContext: PopFile called on empty stack")
 	}
-	if this.fileStack[sl-1] != check {
+	if pctx.fileStack[sl-1] != check {
 		panic("bug: ProgramContext: stack was not managed purely with PushFile/PopFile")
 
 	}
-	this.fileStack = this.fileStack[:sl-1]
+	pctx.fileStack = pctx.fileStack[:sl-1]
 }
 
-func (this *ProgramContext) Push(node ast.Node) {
-	if len(this.fileStack) == 0 {
+func (pctx *ProgramContext) Push(node ast.Node) {
+	if len(pctx.fileStack) == 0 {
 		panic("bug: ProgramContext: Push called without calling PushFile() first ")
 	}
 
-	file := this.fileStack[len(this.fileStack)-1]
+	file := pctx.fileStack[len(pctx.fileStack)-1]
 	item := ContextItem{
 		file:  file,
 		start: *file.Position(node.Idx0()),
 		end:   *file.Position(node.Idx1()),
 		node:  node,
 	}
-	this.stack = append(this.stack, item)
+	pctx.stack = append(pctx.stack, item)
 }
-func (this *ProgramContext) Pop(nodeCheck ast.Node) {
-	sl := len(this.stack)
+func (pctx *ProgramContext) Pop(nodeCheck ast.Node) {
+	sl := len(pctx.stack)
 	if sl == 0 {
 		panic("bug: ProgramContext.Pop but stack already empty")
 	}
 
-	if nodeCheck != nil && nodeCheck != this.stack[sl-1].node {
+	if nodeCheck != nil && nodeCheck != pctx.stack[sl-1].node {
 		panic("bug: nodeCheck != stack top")
 	}
 
-	this.stack = this.stack[:sl-1]
+	pctx.stack = pctx.stack[:sl-1]
 }
 
 type DeclKind uint8
@@ -543,7 +544,7 @@ func (oenv ObjectEnv) defineVar(_ *Scope, kind DeclKind, name Name, value JSValu
 func (oenv ObjectEnv) setVar(scope *Scope, name Name, value JSValue, vm *VM) error {
 	if scope.isSetStrict {
 		if !oenv.HasOwnProperty(name) {
-			msg := fmt.Sprintf("assignment to undeclared global variable: ", name)
+			msg := fmt.Sprintf("assignment to undeclared global variable: %s", name)
 			return vm.ThrowError("ReferenceError", msg)
 		}
 	}
@@ -729,7 +730,7 @@ func (vm *VM) runStmt(stmt ast.Statement) (err error) {
 			return err
 		}
 
-		if vm.isTruthy(testVal) {
+		if vm.coerceToBoolean(testVal) {
 			return vm.runStmt(stmt.Consequent)
 		} else {
 			return vm.runStmt(stmt.Alternate)
@@ -772,26 +773,6 @@ func defineFunction(vm *VM, literal ast.FunctionLiteral) (fnp *JSObject, err err
 	return
 }
 
-func (vm *VM) isTruthy(val JSValue) bool {
-	switch spec := val.(type) {
-	case JSBigInt:
-		return spec != 0
-	case JSBoolean:
-		return bool(spec)
-	case JSNull:
-		return false
-	case JSNumber:
-		return spec != 0.0
-	case JSString:
-		return len(spec) > 0
-	case JSUndefined:
-		return false
-	// case *JSObject:
-	default:
-		panic(fmt.Sprintf("isTruthy not implemented for value: %#v", val))
-	}
-}
-
 type FuncFlags struct {
 	noInheritStrict bool
 }
@@ -814,8 +795,6 @@ func (vm *VM) makeFunction(params *ast.ParameterList, body ast.Statement, opts F
 }
 
 func (vm *VM) evalExpr(expr ast.Expression) (value JSValue, err error) {
-	value = JSUndefined{}
-
 	switch expr := expr.(type) {
 	case *ast.AssignExpression:
 		value, err = vm.evalExpr(expr.Right)
@@ -839,11 +818,146 @@ func (vm *VM) evalExpr(expr ast.Expression) (value JSValue, err error) {
 		return defineFunction(vm, *expr)
 
 	case *ast.ObjectLiteral:
+		obj := NewJSObject(&ProtoObject)
+		for _, prop := range expr.Value {
+			var propValue JSValue
+			propValue, err = vm.evalExpr(prop.Value)
+			if err != nil {
+				return nil, err
+			}
 
-	// case *ast.ArrayLiteral:
-	// case *ast.AssignExpression:
-	// case *ast.BadExpression:
-	// case *ast.BinaryExpression:
+			switch prop.Kind {
+			case "init":
+				obj.SetProperty(NameStr(prop.Key), propValue, vm)
+
+			case "get":
+			case "set":
+				propObj, isObj := propValue.(*JSObject)
+				if !isObj {
+					return nil, fmt.Errorf("object literal getter must be object")
+				}
+				if propObj.funcPart == nil {
+					return nil, fmt.Errorf("object literal getter must be function")
+				}
+
+				ds := obj.getOrDefineProperty(NameStr(prop.Key))
+				if prop.Kind == "get" {
+					ds.get = propObj
+				} else {
+					ds.set = propObj
+				}
+
+			default:
+				err = fmt.Errorf("unsupported obj literal kind = %s", prop.Kind)
+				return
+			}
+		}
+		return &obj, nil
+
+	case *ast.ArrayLiteral:
+		obj := NewJSArray()
+		for _, itemExpr := range expr.Value {
+			value, err = vm.evalExpr(itemExpr)
+			if err != nil {
+				return nil, err
+			}
+			obj.arrayPart = append(obj.arrayPart, value)
+		}
+		return obj, nil
+
+	case *ast.BinaryExpression:
+		var left, right JSValue
+
+		left, err = vm.evalExpr(expr.Left)
+		if err != nil {
+			return
+		}
+		right, err = vm.evalExpr(expr.Right)
+		if err != nil {
+			return
+		}
+
+		switch expr.Operator {
+		case token.STRICT_EQUAL:
+			bval := vm.strictEqual(left, right)
+			return JSBoolean(bval), nil
+
+		case token.STRICT_NOT_EQUAL:
+			bval := vm.strictEqual(left, right)
+			return JSBoolean(!bval), nil
+
+		case token.EQUAL:
+			bval, err := vm.looseEqual(left, right)
+			return JSBoolean(bval), err
+
+		case token.NOT_EQUAL:
+			bval, err := vm.looseEqual(left, right)
+			return JSBoolean(!bval), err
+
+		case token.PLUS:
+			return addition(vm, left, right)
+
+		case token.MINUS, token.MULTIPLY, token.SLASH:
+			return arithmeticOp(vm, left, right, expr.Operator)
+
+		case token.LESS, token.LESS_OR_EQUAL, token.GREATER_OR_EQUAL, token.GREATER:
+			var a, b JSValue
+			a, err = vm.coerceToPrimitive(left, PrimCoerceValueOfFirst)
+			if err != nil {
+				return nil, err
+			}
+			b, err = vm.coerceToPrimitive(right, PrimCoerceValueOfFirst)
+			if err != nil {
+				return nil, err
+			}
+
+			var bval bool
+			switch expr.Operator {
+			case token.LESS:
+				bval, err = isLessThan(vm, a, b)
+			case token.LESS_OR_EQUAL:
+				bval, err = isNotLessThan(vm, b, a)
+			case token.GREATER_OR_EQUAL:
+				bval, err = isNotLessThan(vm, a, b)
+			case token.GREATER:
+				bval, err = isLessThan(vm, b, a)
+			default:
+				panic("unreachable")
+			}
+
+			value = JSBoolean(bval)
+			return
+
+		case token.INSTANCEOF:
+			var obj, constructor, soughtProto *JSObject
+			var protoValue JSValue
+
+			obj, err = vm.coerceToObject(left)
+			if err == nil {
+				constructor, err = vm.coerceToObject(right)
+			}
+			if err == nil {
+				protoValue, err = constructor.GetProperty(NameStr("prototype"), vm)
+			}
+			if err == nil {
+				soughtProto, err = vm.coerceToObject(protoValue)
+			}
+			if err == nil {
+				isInstance := false
+				for ; obj != nil; obj = obj.Prototype {
+					if obj == soughtProto {
+						isInstance = true
+						break
+					}
+				}
+				return JSBoolean(isInstance), nil
+			}
+			return nil, err
+
+		default:
+			return nil, fmt.Errorf("unsupported binary operator: %s", expr.Operator)
+		}
+
 	// case *ast.BooleanLiteral:
 	// case *ast.BracketExpression:
 	// case *ast.CallExpression:
@@ -860,9 +974,202 @@ func (vm *VM) evalExpr(expr ast.Expression) (value JSValue, err error) {
 	// case *ast.ThisExpression:
 	// case *ast.UnaryExpression:
 	// case *ast.VariableExpression:
+	case *ast.BadExpression:
 	default:
 		panic(fmt.Sprintf("unexpected ast.Expression: %#v", expr))
 	}
+
+	panic("unreachable")
+}
+
+func addition(vm *VM, left, right JSValue) (res JSValue, err error) {
+	/*
+		    a. Let lprim be ? ToPrimitive(lval).
+			b. Let rprim be ? ToPrimitive(rval).
+			c. If lprim is a String or rprim is a String, then
+				i. Let lstr be ? ToString(lprim).
+				ii. Let rstr be ? ToString(rprim).
+				iii. Return the string-concatenation of lstr and rstr.
+			d. Set lval to lprim.
+			e. Set rval to rprim.
+	*/
+	lprim, err := vm.coerceToPrimitive(left, PrimCoerceValueOfFirst)
+	if err != nil {
+		return
+	}
+
+	rprim, err := vm.coerceToPrimitive(right, PrimCoerceValueOfFirst)
+	if err != nil {
+		return
+	}
+
+	_, isLStr := lprim.(JSString)
+	_, isRStr := rprim.(JSString)
+	if isLStr || isRStr {
+		var lstr, rstr JSString
+		lstr, err = vm.coerceToString(lprim)
+		if err != nil {
+			return
+		}
+
+		rstr, err = vm.coerceToString(rprim)
+		if err != nil {
+			return
+		}
+
+		return lstr + rstr, nil
+	}
+
+	return arithmeticOp(vm, lprim, rprim, token.PLUS)
+}
+
+func arithmeticOp(vm *VM, l, r JSValue, op token.Token) (res JSValue, err error) {
+	/*
+		3. Let lnum be ? ToNumeric(lval).
+		4. Let rnum be ? ToNumeric(rval).
+		5. If Type(lnum) is not Type(rnum), throw a TypeError exception.
+		6. If lnum is a BigInt, then
+
+			a. If opText is **, return ? BigInt::exponentiate(lnum, rnum).
+			b. If opText is /, return ? BigInt::divide(lnum, rnum).
+			c. If opText is %, return ? BigInt::remainder(lnum, rnum).
+			d. If opText is >>>, return ? BigInt::unsignedRightShift(lnum, rnum).
+
+		7. Let operation be the abstract operation associated with opText and Type(lnum) in the following table:
+	*/
+
+	var lin, rin JSValue
+
+	lin, err = vm.coerceNumeric(l)
+	if err != nil {
+		return
+	}
+
+	rin, err = vm.coerceNumeric(r)
+	if err != nil {
+		return
+	}
+
+	if lin.Category() != rin.Category() {
+		err = vm.ThrowError("TypeError", "arithmetic is invalid for types number/bigint or bigint/number")
+		return
+	}
+
+	if li, isBigInt := lin.(JSBigInt); isBigInt {
+		ri, isRBI := rin.(JSBigInt)
+		if !isRBI {
+			panic("bug: rhs value in arithmetic must be bigint here")
+		}
+		switch op {
+		// TODO: operator `**`
+		case token.MULTIPLY:
+			return li * ri, nil
+		case token.PLUS:
+			return li + ri, nil
+		case token.MINUS:
+			return li - ri, nil
+		case token.SHIFT_LEFT:
+			return li << ri, nil
+		case token.SHIFT_RIGHT:
+			return li >> ri, nil
+		case token.EXCLUSIVE_OR:
+			return li ^ ri, nil
+		case token.AND:
+			return li & ri, nil
+		case token.OR:
+			return li | ri, nil
+		case token.SLASH:
+			return li / ri, nil
+		case token.REMAINDER:
+			return li % ri, nil
+		case token.UNSIGNED_SHIFT_RIGHT:
+			return li >> ri, nil
+		default:
+			err = vm.ThrowError("SyntaxError", "unsupported/invalid arithmetic operator: "+op.String())
+			return
+		}
+	} else if ln, isNum := lin.(JSNumber); isNum {
+		rn, isRNum := rin.(JSNumber)
+		if !isRNum {
+			panic("bug: rhs value in arithmetic must be bigint here")
+		}
+
+		switch op {
+		// TODO operator `**` (exponentiate)
+		case token.MULTIPLY:
+			return ln * rn, nil
+		case token.SLASH:
+			return ln / rn, nil
+		case token.REMAINDER:
+			return JSNumber(floatRemainder(float64(ln), float64(rn))), nil
+		case token.PLUS:
+			return ln + rn, nil
+		case token.MINUS:
+			return ln - rn, nil
+		case token.SHIFT_LEFT:
+			return JSNumber(int32(ln) << int32(rn)), nil
+		case token.SHIFT_RIGHT:
+			return JSNumber(int32(ln) >> int32(rn)), nil
+		case token.UNSIGNED_SHIFT_RIGHT:
+			return JSNumber(int32(ln) >> int32(rn)), nil
+		case token.AND:
+			return JSNumber(int32(ln) & int32(rn)), nil
+		case token.OR:
+			return JSNumber(int32(ln) | int32(rn)), nil
+		case token.EXCLUSIVE_OR:
+			return JSNumber(int32(ln) ^ int32(rn)), nil
+		default:
+			err = vm.ThrowError("SyntaxError", "unsupported/invalid arithmetic operator: "+op.String())
+			return
+		}
+
+	} else {
+		panic("bug: coerceNumeric returned something other than number or bigint")
+	}
+
+}
+
+func floatRemainder(n, d float64) float64 {
+	// 1. If n is NaN or d is NaN, return NaN.
+	if math.IsNaN(n) || math.IsNaN(d) {
+		return math.NaN()
+	}
+
+	// 2. If n is either +∞𝔽 or -∞𝔽, return NaN.
+	if math.IsInf(n, 0) {
+		return math.NaN()
+	}
+
+	// 3. If d is either +∞𝔽 or -∞𝔽, return n.
+	if math.IsInf(d, 0) {
+		return n
+	}
+
+	// 4. If d is either +0𝔽 or -0𝔽, return NaN.
+	if d == 0.0 || d == math.Copysign(0, -1) {
+		return math.NaN()
+	}
+
+	// 5. If n is either +0𝔽 or -0𝔽, return n.
+	if n == 0.0 || n == math.Copysign(0, -1) {
+		return n
+	}
+
+	// 6. Assert: n and d are finite and non-zero.
+	// 7. Let quotient be ℝ(n) / ℝ(d).
+	// 8. Let q be truncate(quotient).
+	// 9. Let r be ℝ(n) - (ℝ(d) × q).
+	quotient := n / d
+	q := math.Trunc(quotient)
+	r := n - (d * q)
+
+	// 10. If r = 0 and n < -0𝔽, return -0𝔽.
+	if r == 0 && n < math.Copysign(0, -1) {
+		return math.Copysign(0, -1)
+	}
+
+	// 11. Return 𝔽(r).
+	return r
 }
 
 func doAssignment(vm *VM, target ast.Expression, value JSValue) error {
@@ -970,6 +1277,518 @@ func (vm *VM) coerceToBoolean(value JSValue) JSBoolean {
 		return false
 	default:
 		panic(fmt.Sprintf("coerceToBoolean: invalid value type: %#v", value))
+	}
+}
+
+func (vm *VM) strictEqual(left, right JSValue) bool {
+	switch leftV := left.(type) {
+	case JSBigInt:
+		rightV, isSame := right.(JSBigInt)
+		if !isSame {
+			return false
+		}
+		return leftV == rightV
+	case JSBoolean:
+		rightV, isSame := right.(JSBoolean)
+		if !isSame {
+			return false
+		}
+		return leftV == rightV
+	case JSNumber:
+		rightV, isSame := right.(JSNumber)
+		if !isSame {
+			return false
+		}
+		return leftV == rightV
+	case *JSObject:
+		rightV, isSame := right.(*JSObject)
+		if !isSame {
+			return false
+		}
+		return leftV == rightV
+	case JSString:
+		rightV, isSame := right.(JSString)
+		if !isSame {
+			return false
+		}
+		return leftV == rightV
+
+	case JSNull:
+		_, isSame := right.(JSNull)
+		return isSame
+	case JSUndefined:
+		_, isSame := right.(JSUndefined)
+		return isSame
+
+	default:
+		panic(fmt.Sprintf("unexpected value for strict equal comparison: %#v", left))
+	}
+}
+
+func (vm *VM) looseEqual(a, b JSValue) (ret bool, err error) {
+	/*
+		If the operands have the same type, they are compared as follows:
+			Object: return true only if both operands reference the same object.
+			String: return true only if both operands have the same characters in the same order.
+			Number: return true only if both operands have the same value. +0 and -0 are treated as the same value. If either operand is NaN, return false; so, NaN is never equal to NaN.
+			Boolean: return true only if operands are both true or both false.
+			BigInt: return true only if both operands have the same value.
+			Symbol: return true only if both operands reference the same symbol.
+		If one of the operands is null or undefined, the other must also be null or undefined to return true. Otherwise return false.
+		If one of the operands is an object and the other is a primitive, convert the object to a primitive.
+		At this step, both operands are converted to primitives (one of String, Number, Boolean, Symbol, and BigInt). The rest of the conversion is done case-by-case.
+			If they are of the same type, compare them using step 1.
+			If one of the operands is a Symbol but the other is not, return false.
+			If one of the operands is a Boolean but the other is not, convert the boolean to a number: true is converted to 1, and false is converted to 0. Then compare the two operands loosely again.
+			Number to String: convert the string to a number. Conversion failure results in NaN, which will guarantee the equality to be false.
+			Number to BigInt: compare by their numeric value. If the number is ±Infinity or NaN, return false.
+			String to BigInt: convert the string to a BigInt using the same algorithm as the BigInt() constructor. If conversion fails, return false.
+	*/
+
+	for counter := 0; counter < 5; counter++ {
+		if err != nil {
+			return
+		}
+
+		if a.Category() == b.Category() {
+			// same type
+			ret = vm.strictEqual(a, b)
+			return
+		}
+
+		_, isAU := a.(JSUndefined)
+		_, isAN := a.(JSNull)
+		_, isBU := b.(JSUndefined)
+		_, isBN := b.(JSNull)
+		if isAU || isAN || isBU || isBN {
+			ret = (isAU || isAN) && (isBU || isBN)
+			return
+		}
+
+		_, isAObj := a.(*JSObject)
+		_, isBObj := b.(*JSObject)
+		if isAObj {
+			if isBObj {
+				panic("inconsistent value type")
+			}
+			a, err = vm.coerceToPrimitive(a, PrimCoerceValueOfFirst)
+			continue
+		}
+		if isBObj {
+			if isAObj {
+				panic("inconsistent value type")
+			}
+			b, err = vm.coerceToPrimitive(b, PrimCoerceValueOfFirst)
+			continue
+		}
+
+		// TODO Check for Symbol here
+
+		// If one of the operands is a Boolean but the other is not,
+		// convert the boolean to a number: true is converted to 1, and
+		// false is converted to 0. Then compare the two operands
+		// loosely again.
+		aBool, isABool := a.(JSBoolean)
+		bBool, isBBool := b.(JSBoolean)
+		if isABool {
+			if aBool {
+				a = JSNumber(1.0)
+			} else {
+				a = JSNumber(0.0)
+			}
+			continue
+		}
+		if isBBool {
+			if bBool {
+				a = JSNumber(1.0)
+			} else {
+				a = JSNumber(0.0)
+			}
+			continue
+		}
+
+		_, isAStr := a.(JSString)
+		_, isBStr := a.(JSString)
+		_, isANum := a.(JSNumber)
+		_, isBNum := a.(JSNumber)
+		if isAStr && isBNum {
+			a, err = vm.coerceToNumber(a)
+			continue
+		}
+		if isANum && isBStr {
+			b, err = vm.coerceToNumber(b)
+			continue
+		}
+
+		_, isABigInt := a.(JSBigInt)
+		_, isBBigInt := a.(JSBigInt)
+		if isAStr && isBBigInt {
+			a, err = vm.coerceToBigInt(a)
+			continue
+		}
+		if isABigInt && isBStr {
+			b, err = vm.coerceToBigInt(b)
+			continue
+		}
+
+		panic("unreachable!")
+	}
+
+	panic("bug: looseEqual iterated too many times!")
+}
+
+func (vm *VM) coerceNumeric(value JSValue) (num JSValue, err error) {
+	num, err = vm.coerceToPrimitive(value, PrimCoerceValueOfFirst)
+	if err != nil {
+		return
+	}
+
+	if _, isBigInt := num.(JSBigInt); !isBigInt {
+		num, err = vm.coerceToNumber(num)
+	}
+	return
+}
+
+func (vm *VM) coerceToNumber(value JSValue) (num JSNumber, err error) {
+	/*
+		Numbers are returned as-is.
+		undefined turns into NaN.
+		null turns into 0.
+		true turns into 1; false turns into 0.
+		Strings are converted by parsing them as if they contain a number literal.
+		Parsing failure results in NaN. There are some minor differences compared to an actual number literal:
+			Leading and trailing whitespace/line terminators are ignored. A leading
+			0 digit does not cause the number to become an octal literal (or get
+			rejected in strict mode). + and - are allowed at the start of the string
+			to indicate its sign. (In actual code, they "look like" part of the
+			literal, but are actually separate unary operators.) However, the sign
+			can only appear once, and must not be followed by whitespace. Infinity
+			and -Infinity are recognized as literals. In actual code, they are
+			global variables. Empty or whitespace-only strings are converted to 0.
+			Numeric separators are not allowed.
+		BigInts throw a TypeError to prevent unintended implicit coercion causing loss of precision.
+		Symbols throw a TypeError.
+		Objects are first converted to a primitive by calling their [Symbol.toPrimitive]() (with "number" as hint), valueOf(), and toString() methods, in that order. The resulting primitive is then converted to a number.
+	*/
+
+	switch spec := value.(type) {
+	case JSNull:
+		num = 0
+	case JSBigInt:
+		num = JSNumber(float64(int64(spec)))
+	case JSBoolean:
+		if spec {
+			num = JSNumber(1.0)
+		} else {
+			num = JSNumber(0.0)
+		}
+
+	case JSNumber:
+		break
+
+	case *JSObject:
+		var prim JSValue
+		prim, err = vm.coerceToPrimitive(value, PrimCoerceValueOfFirst)
+		if err == nil {
+			num, err = vm.coerceToNumber(prim)
+		}
+
+	case JSString:
+		var numF64 float64
+		numF64, err = strconv.ParseFloat(string(spec), 64)
+		num = JSNumber(numF64)
+
+	case JSUndefined:
+		num = JSNumber(math.NaN())
+
+	default:
+		panic(fmt.Sprintf("unexpected modeledjs.JSValue: %#v", spec))
+	}
+
+	return
+}
+
+type PrimCoerceOrder uint8
+
+const (
+	PrimCoerceValueOfFirst PrimCoerceOrder = iota
+	PrimCoerceToStringFirst
+)
+
+func (vm *VM) coerceToPrimitive(value JSValue, order PrimCoerceOrder) (prim JSValue, err error) {
+	switch spec := value.(type) {
+	case *JSObject:
+		// valToPrimitive, err := vm.globalObject.GetProperty(NameStr("Symbol"), vm)
+		// if err != nil {
+		// 	return nil, err
+		// }
+		// symToPrimitive, isSym := valToPrimitive.(JSSymbol)
+
+		var callOrder []string
+		switch order {
+		case PrimCoerceValueOfFirst:
+			callOrder = []string{"toString", "valueOf"}
+		case PrimCoerceToStringFirst:
+			callOrder = []string{"valueOf", "toString"}
+		default:
+			return nil, fmt.Errorf("invalid order (only allowed are PrimCoerceToStringFirst, PrimCoerceValueOfFirst)")
+		}
+
+		for _, methodName := range callOrder {
+			methodVal, err := spec.GetProperty(NameStr(methodName), vm)
+			if err != nil {
+				return nil, err
+			}
+			methodObj, isObj := methodVal.(*JSObject)
+			if !isObj || methodObj.funcPart == nil {
+				continue
+			}
+
+			ret, err := methodObj.Invoke(vm, value, []JSValue{}, CallFlags{})
+			if err != nil {
+				return nil, err
+			}
+			switch ret := ret.(type) {
+			case *JSObject:
+			case JSUndefined:
+				continue
+			default:
+				// primitive
+				return ret, nil
+			}
+		}
+		return nil, vm.ThrowError("TypeError", "value can't be converted to a primitive")
+
+	default:
+		prim = value
+		return
+	}
+
+}
+
+func (vm *VM) coerceToString(val JSValue) (ret JSString, err error) {
+	switch val := val.(type) {
+	case JSString:
+		return val, nil
+	// TODO case JSSymbol
+	case JSUndefined:
+		return "undefined", nil
+	case JSNull:
+		return "null", nil
+	case JSBoolean:
+		if val {
+			return "true", nil
+		} else {
+			return "false", nil
+		}
+	case JSNumber:
+		s := fmt.Sprintf("%f", float64(val))
+		return JSString(s), nil
+	case JSBigInt:
+		s := fmt.Sprintf("%d", int64(val))
+		return JSString(s), nil
+	case *JSObject:
+		prim, err := vm.coerceToPrimitive(val, PrimCoerceToStringFirst)
+		if err != nil {
+			return "", err
+		}
+		if _, isObj := prim.(*JSObject); isObj {
+			panic("bug: coerceToPrimitive returned object")
+		}
+		return vm.coerceToString(prim)
+
+	default:
+		panic("bug: invalid type for coerceToString operand")
+	}
+}
+
+func (vm *VM) coerceToBigInt(value JSValue) (ret JSBigInt, err error) {
+	if _, isObj := value.(*JSObject); isObj {
+		value, err = vm.coerceToPrimitive(value, PrimCoerceValueOfFirst)
+		if err != nil {
+			return
+		}
+	}
+
+	switch spec := value.(type) {
+	case JSBigInt:
+		ret = spec
+	case JSNumber:
+		ret = JSBigInt(int64(spec))
+	case JSBoolean:
+		if spec {
+			ret = 1
+		} else {
+			ret = 0
+		}
+	case JSString:
+		retI64, err := strconv.ParseInt(string(spec), 10, 64)
+		if err == nil {
+			ret = JSBigInt(retI64)
+		}
+
+	case JSNull:
+	case JSUndefined:
+		// case JSSymbol:
+		err = vm.ThrowError("TypeError", "can't convert to BigInt from null, undefined or symbol")
+
+	default:
+		panic(fmt.Sprintf("unexpected modeledjs.JSValue: %#v", value))
+	}
+
+	return
+}
+
+type tribool uint8
+
+const (
+	TFalse tribool = iota
+	TTrue
+	TNeither
+)
+
+func bool2tri(b bool) tribool {
+	if b {
+		return TTrue
+	} else {
+		return TFalse
+	}
+}
+
+func compareLessThan(vm *VM, a, b JSValue) (ret tribool, err error) {
+	_, isAObj := a.(*JSObject)
+	_, isBObj := b.(*JSObject)
+	if isAObj {
+		return TNeither, fmt.Errorf("a must be primitive")
+	}
+	if isBObj {
+		return TNeither, fmt.Errorf("b must be primitive")
+	}
+
+	if aStr, isAStr := a.(JSString); isAStr {
+		if bStr, isBStr := b.(JSString); isBStr {
+			al := len(aStr)
+			bl := len(bStr)
+
+			limit := min(al, bl)
+			for i := 0; i < limit; i++ {
+				ac := aStr[i]
+				bc := bStr[i]
+				if ac < bc {
+					return TTrue, nil
+				}
+				if ac > bc {
+					return TFalse, nil
+				}
+			}
+			if al < bl {
+				return TTrue, nil
+			}
+			return TFalse, nil
+		} else if bBI, isBBigInt := b.(JSBigInt); isBBigInt {
+			aBI, err := strconv.ParseInt(string(aStr), 10, 64)
+			if err != nil {
+				return TNeither, nil
+			}
+			return bool2tri(aBI < int64(bBI)), nil
+		}
+	} else if aBI, isABigInt := a.(JSBigInt); isABigInt {
+		if bStr, isBStr := b.(JSString); isBStr {
+			bBI, err := strconv.ParseInt(string(bStr), 10, 64)
+			if err != nil {
+				return TNeither, nil
+			}
+			return bool2tri(int64(aBI) < bBI), nil
+		}
+	}
+
+	// numeric comparison
+	abn, err := vm.coerceNumeric(a)
+	if err != nil {
+		return TNeither, err
+	}
+	bbn, err := vm.coerceNumeric(b)
+	if err != nil {
+		return TNeither, err
+	}
+
+	an, isANum := abn.(JSNumber)
+	bn, isBNum := bbn.(JSNumber)
+	ai, isABigInt := abn.(JSBigInt)
+	bi, isBBigInt := bbn.(JSBigInt)
+
+	if isANum {
+		if math.IsNaN(float64(an)) {
+			return TNeither, nil
+		} else if math.IsInf(float64(an), -1) {
+			return TTrue, nil
+		} else if math.IsInf(float64(an), +1) {
+			return TFalse, nil
+		}
+	}
+	if isBNum {
+		if math.IsNaN(float64(bn)) {
+			return TNeither, nil
+		} else if math.IsInf(float64(bn), -1) {
+			return TFalse, nil
+		} else if math.IsInf(float64(bn), +1) {
+			return TTrue, nil
+		}
+	}
+
+	if isANum {
+		if isBNum {
+			return bool2tri(an < bn), nil
+		} else if isBBigInt {
+			// replacing a with floor(a) does not influence the comparison
+			aFloor := int64(math.Floor(float64(an)))
+			return bool2tri(aFloor < int64(bi)), nil
+		} else {
+			panic("bug: invalid type b from coerceNumeric")
+		}
+	} else if isABigInt {
+		if isBNum {
+			// replacing b with ceil(b) does not influence the comparison
+			bCeil := int64(math.Ceil(float64(bn)))
+			return bool2tri(int64(ai) < bCeil), nil
+		} else if isBBigInt {
+			return bool2tri(ai < bi), nil
+		} else {
+			panic("bug: invalid type b from coerceNumeric")
+		}
+	} else {
+		panic("bug: invalid type a from coerceNumeric")
+	}
+}
+
+func isLessThan(vm *VM, a, b JSValue) (ret bool, err error) {
+	tri, err := compareLessThan(vm, a, b)
+	if err != nil {
+		return false, err
+	}
+	switch tri {
+	case TFalse, TNeither:
+		return false, nil
+	case TTrue:
+		return true, nil
+	default:
+		panic(fmt.Sprintf("unexpected modeledjs.tribool: %#v", tri))
+	}
+}
+
+func isNotLessThan(vm *VM, a, b JSValue) (ret bool, err error) {
+	tri, err := compareLessThan(vm, a, b)
+	if err != nil {
+		return false, err
+	}
+	switch tri {
+	// note that TNeither always results in false, even with negation
+	case TTrue, TNeither:
+		return false, nil
+	case TFalse:
+		return true, nil
+	default:
+		panic(fmt.Sprintf("unexpected modeledjs.tribool: %#v", tri))
 	}
 }
 

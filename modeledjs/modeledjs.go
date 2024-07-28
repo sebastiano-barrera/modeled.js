@@ -859,17 +859,44 @@ func (vm *VM) RunScriptReader(path string, f io.Reader) error {
 		return err
 	}
 
-	// NOTE This avoids a corner case that is not correctly managed by the parser library
-	// program.Idx0() would panic
-	if len(program.Body) == 0 {
-		program.Body = []ast.Statement{
-			&ast.EmptyStatement{},
-		}
+	err = fixAndCheck(program)
+	if err != nil {
+		return err
 	}
 
 	vm.synCtx.PushFile(program.File)
 	defer vm.synCtx.PopFile(program.File)
 	return vm.runProgram(program)
+}
+
+func fixAndCheck(node ast.Node) error {
+	chk := &checker{}
+	ast.Walk(chk, node)
+	return chk.err
+}
+
+type checker struct {
+	err error
+}
+
+func (c *checker) Enter(node ast.Node) (v ast.Visitor) {
+	switch node := node.(type) {
+	case *ast.Program:
+		// NOTE This avoids a corner case that is not correctly managed by the parser library
+		// program.Idx0() would panic
+		if len(node.Body) == 0 {
+			node.Body = []ast.Statement{
+				&ast.EmptyStatement{},
+			}
+		}
+	}
+
+	// keep using the same visitor
+	return nil
+}
+
+func (c *checker) Exit(node ast.Node) {
+	// do nothing, we're fine
 }
 
 func (vm *VM) runProgram(program *ast.Program) error {

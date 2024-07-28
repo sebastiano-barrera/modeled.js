@@ -2562,10 +2562,32 @@ func (c *checker) Enter(node ast.Node) (v ast.Visitor) {
 		if c.isStrictHere() && isStrictReservedKw(node.Name) {
 			c.emitErr(fmt.Sprintf("variable can't be named %s in strict mode (it's a reserved keyword)", node.Name))
 		}
+
+	case *ast.WithStatement:
+		if c.isStrictHere() {
+			c.emitErr("with statement can't appear in strict mode")
+		}
+
+	case *ast.ForStatement:
+		c.forbidFuncDecl(node.Body)
+	case *ast.ForInStatement:
+		c.forbidFuncDecl(node.Body)
+	case *ast.WhileStatement:
+		c.forbidFuncDecl(node.Body)
+	case *ast.DoWhileStatement:
+		c.forbidFuncDecl(node.Body)
 	}
 
 	// keep using the same visitor
 	return c
+}
+
+func (c *checker) forbidFuncDecl(node ast.Node) {
+	_, isFnDecl := node.(*ast.FunctionLiteral)
+	_, isFnStmt := node.(*ast.FunctionStatement)
+	if isFnDecl || isFnStmt {
+		c.emitErr("function declaration cannot appear in statement position")
+	}
 }
 
 var strictReservedKw = []string{

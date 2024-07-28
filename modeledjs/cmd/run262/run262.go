@@ -80,23 +80,23 @@ func main() {
 			}
 		}
 
-		fmt.Printf("%d SUCCESSES:\n", successesCount)
+		fmt.Printf("group SUCCESSES %d\n", successesCount)
 		for _, co := range successes {
 			strictMode := "sloppy"
 			if co.StrictMode {
 				strictMode = "strict"
 			}
-			fmt.Printf("  - %s (%s)\n", co.Path, strictMode)
+			fmt.Printf("case\t%s\t%s\n", co.Path, strictMode)
 		}
 
-		fmt.Printf("\n%d FAILURES:\n", failuresCount)
+		fmt.Printf("group FAILURES %d\n", failuresCount)
 		for _, co := range failures {
 			strictMode := "sloppy"
 			if co.StrictMode {
 				strictMode = "strict"
 			}
 
-			fmt.Printf("\t- %s (%s)\n", co.Path, strictMode)
+			fmt.Printf("case\t%s\t%s\n", co.Path, strictMode)
 
 			var errLines []string
 			if co.Error != nil {
@@ -104,14 +104,14 @@ func main() {
 			}
 			for ndx, line := range errLines {
 				if ndx == 0 {
-					fmt.Printf("\t|\tERROR: %s\n", line)
+					fmt.Printf("error\t\t%s\n", line)
 				} else {
-					fmt.Printf("\t|\t%s\n", line)
+					fmt.Printf("ectx\t\t%s\n", line)
 				}
 			}
 		}
 
-		fmt.Printf("\n\n total: %d; %d successes; %d failures", len(result.Cases), successesCount, failuresCount)
+		fmt.Printf("summary\ttotal: %d; %d successes; %d failures\n", len(result.Cases), successesCount, failuresCount)
 
 	}
 }

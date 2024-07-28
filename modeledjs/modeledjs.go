@@ -859,7 +859,7 @@ func (vm *VM) RunScriptReader(path string, f io.Reader) error {
 		return err
 	}
 
-	err = fixAndCheck(program)
+	err = fixAndCheck(program.File, program)
 	if err != nil {
 		return err
 	}
@@ -867,36 +867,6 @@ func (vm *VM) RunScriptReader(path string, f io.Reader) error {
 	vm.synCtx.PushFile(program.File)
 	defer vm.synCtx.PopFile(program.File)
 	return vm.runProgram(program)
-}
-
-func fixAndCheck(node ast.Node) error {
-	chk := &checker{}
-	ast.Walk(chk, node)
-	return chk.err
-}
-
-type checker struct {
-	err error
-}
-
-func (c *checker) Enter(node ast.Node) (v ast.Visitor) {
-	switch node := node.(type) {
-	case *ast.Program:
-		// NOTE This avoids a corner case that is not correctly managed by the parser library
-		// program.Idx0() would panic
-		if len(node.Body) == 0 {
-			node.Body = []ast.Statement{
-				&ast.EmptyStatement{},
-			}
-		}
-	}
-
-	// keep using the same visitor
-	return nil
-}
-
-func (c *checker) Exit(node ast.Node) {
-	// do nothing, we're fine
 }
 
 func (vm *VM) runProgram(program *ast.Program) error {
@@ -2485,4 +2455,145 @@ func (vm *VM) makeException(excValue JSValue) error {
 		exceptionValue: excValue,
 		context:        ProgramContext(vm.synCtx),
 	}
+}
+
+func fixAndCheck(file *parserFile.File, node ast.Node) error {
+	chk := &checker{
+		file: file,
+	}
+	ast.Walk(chk, node)
+	if len(chk.errs) > 0 {
+		return multiSyntaxErrors(chk.errs)
+	}
+	return nil
+}
+
+type checker struct {
+	file *parserFile.File
+	errs []error
+	ctx  []checkerContext
+}
+type checkerContext struct {
+	node      ast.Node
+	setStrict bool
+}
+
+type multiSyntaxErrors []error
+
+func (mserr multiSyntaxErrors) Error() string {
+	switch len(mserr) {
+	case 0:
+		return "no syntax errors"
+	case 1:
+		return mserr[0].Error()
+	default:
+		lines := make([]string, 1+len(mserr))
+		lines[0] = fmt.Sprintf("%d syntax errors:", len(mserr))
+		for i, err := range mserr {
+			lines[i] = fmt.Sprintf("%3d. %s", i+1, err.Error())
+		}
+		return strings.Join(lines, "\n")
+	}
+}
+
+func (c *checker) setStrict() {
+	cl := len(c.ctx)
+	for i := 0; i < cl; i++ {
+		ctx := &c.ctx[cl-1-i]
+
+		_, isFuncLit := ctx.node.(*ast.FunctionLiteral)
+		_, isProgram := ctx.node.(*ast.Program)
+
+		if isFuncLit || isProgram {
+			ctx.setStrict = true
+			break
+		}
+	}
+}
+
+func (c *checker) isStrictHere() bool {
+	cl := len(c.ctx)
+	for i := 0; i < cl; i++ {
+		item := c.ctx[cl-1-i]
+		if item.setStrict {
+			return true
+		}
+	}
+	return false
+}
+
+func (c *checker) emitErr(msg string) {
+	var err error
+
+	node := c.ctx[len(c.ctx)-1].node
+	if c.file == nil {
+		err = fmt.Errorf("?:?: %s", msg)
+	} else {
+		idx := node.Idx0()
+		pos := c.file.Position(idx)
+		err = fmt.Errorf("%s: %s", pos, msg)
+	}
+
+	c.errs = append(c.errs, err)
+}
+
+func (c *checker) Enter(node ast.Node) (v ast.Visitor) {
+	c.ctx = append(c.ctx, checkerContext{
+		node:      node,
+		setStrict: false,
+	})
+
+	switch node := node.(type) {
+	case *ast.Program:
+		// NOTE This avoids a corner case that is not correctly managed by the parser library
+		// program.Idx0() would panic
+		if len(node.Body) == 0 {
+			node.Body = []ast.Statement{
+				&ast.EmptyStatement{},
+			}
+		}
+
+	case *ast.StringLiteral:
+		if node.Value == "use strict" {
+			c.setStrict()
+		}
+
+	case *ast.VariableExpression:
+		if c.isStrictHere() && isStrictReservedKw(node.Name) {
+			c.emitErr(fmt.Sprintf("variable can't be named %s in strict mode (it's a reserved keyword)", node.Name))
+		}
+	}
+
+	// keep using the same visitor
+	return c
+}
+
+var strictReservedKw = []string{
+	"implements",
+	"let",
+	"private",
+	"public",
+	"interface",
+	"package",
+	"protected",
+	"static",
+	"yield",
+}
+
+// Returns true iff the given string corresponds to a keyword that is reserved in strict mode only.
+func isStrictReservedKw(s string) bool {
+	for _, kw := range strictReservedKw {
+		if kw == s {
+			return true
+		}
+	}
+	return false
+}
+
+func (c *checker) Exit(node ast.Node) {
+	if c.ctx[len(c.ctx)-1].node != node {
+		panic("bug: fixAndCheck: inconsistent context")
+	}
+
+	c.ctx = c.ctx[:len(c.ctx)-1]
 }

@@ -247,8 +247,8 @@ func parseMetadata(text []byte) (mt Metadata, err error) {
 	metadataYaml := text[startNdx+5 : endNdx]
 
 	var metadataRaw struct {
-		flags    []string
-		includes []string
+		Flags    []string
+		Includes []string
 	}
 
 	err = yaml.Unmarshal(metadataYaml, &metadataRaw)
@@ -256,7 +256,7 @@ func parseMetadata(text []byte) (mt Metadata, err error) {
 		return
 	}
 
-	for _, flag := range metadataRaw.flags {
+	for _, flag := range metadataRaw.Flags {
 		switch flag {
 		case "noStrict":
 			mt.NoStrict = true
@@ -265,6 +265,6 @@ func parseMetadata(text []byte) (mt Metadata, err error) {
 		}
 	}
 
-	mt.Includes = metadataRaw.includes
+	mt.Includes = metadataRaw.Includes
 	return
 }

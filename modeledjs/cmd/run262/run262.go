@@ -151,13 +151,13 @@ func runMany(test262Root string, testCases []string) (result RunManyResult) {
 		result.Cases = append(result.Cases, CaseOutcome{
 			Path:       relPath,
 			StrictMode: true,
-			Success:    (errStrict == nil),
+			Success:    (errStrict == nil || errStrict == ErrCaseDisabledInMetadata),
 			Error:      errStrict,
 		})
 		result.Cases = append(result.Cases, CaseOutcome{
 			Path:       relPath,
 			StrictMode: false,
-			Success:    (errSloppy == nil),
+			Success:    (errSloppy == nil || errSloppy == ErrCaseDisabledInMetadata),
 			Error:      errSloppy,
 		})
 	}

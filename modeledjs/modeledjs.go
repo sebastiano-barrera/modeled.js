@@ -763,7 +763,7 @@ func NewVM() (vm VM) {
 func createGlobalObject() (G JSObject) {
 	G = NewJSObject(&ProtoObject)
 
-	addPrimitiveWrapperConstructor(
+	consString := addPrimitiveWrapperConstructor(
 		&G, "String", &ProtoString,
 		func(vm *VM, jsv JSValue) (JSString, error) {
 			return vm.coerceToString(jsv)
@@ -773,7 +773,7 @@ func createGlobalObject() (G JSObject) {
 		},
 	)
 
-	addPrimitiveWrapperConstructor(
+	consBoolean := addPrimitiveWrapperConstructor(
 		&G, "Boolean", &ProtoBoolean,
 		func(vm *VM, jsv JSValue) (JSBoolean, error) {
 			return vm.coerceToBoolean(jsv), nil
@@ -783,7 +783,7 @@ func createGlobalObject() (G JSObject) {
 		},
 	)
 
-	addPrimitiveWrapperConstructor(
+	consNumber := addPrimitiveWrapperConstructor(
 		&G, "Number", &ProtoNumber,
 		func(vm *VM, jsv JSValue) (JSNumber, error) {
 			return vm.coerceToNumber(jsv)
@@ -792,6 +792,69 @@ func createGlobalObject() (G JSObject) {
 			obj.primNumber = jsn
 		},
 	)
+
+	// BigInt is slightly different (not a constructor)
+	consBigInt := NewNativeFunction(
+		[]string{"primitiveValue"},
+		func(vm *VM, subject JSValue, args []JSValue, flags CallFlags) (JSValue, error) {
+			if flags.isNew {
+				// WHY THOUGH
+				return nil, vm.ThrowError("TypeError", "BigInt is not a constructor")
+			}
+
+			var arg JSValue
+			if len(args) == 0 {
+				arg = JSUndefined{}
+			} else {
+				arg = args[0]
+			}
+
+			return vm.coerceToBigInt(arg)
+		})
+	G.SetProperty(NameStr("BigInt"), &consBigInt, nil)
+
+	consObject := NewNativeFunction(
+		[]string{"value"},
+		func(vm *VM, subject JSValue, args []JSValue, flags CallFlags) (JSValue, error) {
+			var value JSValue = JSUndefined{}
+			if len(args) > 0 {
+				value = args[0]
+			}
+
+			var constructor *JSObject
+			switch spec := value.(type) {
+			case JSBigInt:
+				constructor = &consBigInt
+			case JSBoolean:
+				constructor = consBoolean
+			case JSNumber:
+				constructor = consNumber
+			case JSString:
+				constructor = consString
+			case *JSObject:
+				return spec, nil
+			case JSUndefined, JSNull:
+				emptyObj := NewJSObject(&ProtoObject)
+				return &emptyObj, nil
+			default:
+				panic(fmt.Sprintf("unexpected modeledjs.JSValue: %#v", value))
+			}
+
+			initObj := NewJSObject(&ProtoObject)
+			return constructor.Invoke(vm, &initObj, args[:1], CallFlags{isNew: true})
+		},
+	)
+	G.SetProperty(NameStr("Object"), &consObject, nil)
+
+	consArray := NewNativeFunction(
+		nil,
+		func(vm *VM, subject JSValue, args []JSValue, flags CallFlags) (ret JSValue, err error) {
+			obj := NewJSArray()
+			obj.arrayPart = args
+			return obj, nil
+		},
+	)
+	G.SetProperty(NameStr("Array"), &consArray, nil)
 
 	cashPrint := NewNativeFunction(
 		[]string{"value"},
@@ -815,7 +878,7 @@ func addPrimitiveWrapperConstructor[T JSValue](
 	prototype *JSObject,
 	coercer func(vm *VM, jsv JSValue) (T, error),
 	primInit func(obj *JSObject, prim T),
-) {
+) *JSObject {
 	constructor := NewNativeFunction(
 		[]string{"primitiveValue"},
 		func(vm *VM, subject JSValue, args []JSValue, flags CallFlags) (JSValue, error) {
@@ -842,6 +905,7 @@ func addPrimitiveWrapperConstructor[T JSValue](
 		})
 
 	globalObj.SetProperty(NameStr(name), &constructor, nil)
+	return &constructor
 }
 
 func (vm *VM) withScope(action func()) {
@@ -1557,6 +1621,7 @@ func (vm *VM) evalExpr(expr ast.Expression) (value JSValue, err error) {
 			err = vm.ThrowError("NameError", msg)
 		}
 		return value, err
+
 	case *ast.BooleanLiteral:
 		return JSBoolean(expr.Value), nil
 	case *ast.NullLiteral:

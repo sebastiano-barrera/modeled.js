@@ -20,6 +20,7 @@ import (
 var (
 	test262Root = flag.String("test262", "", "Path to the test262 respository")
 	testCase    = flag.String("single", "", "Run this specific testcase (path relative to the test262 root)")
+	showAST     = flag.Bool("showAST", false, "Show the AST of the main script")
 
 	textSta    string
 	textAssert string
@@ -174,6 +175,13 @@ func runTestCase(test262Root, testCase string) (errStrict, errSloppy error) {
 	textBytes, err := os.ReadFile(testCaseAbs)
 	if err != nil {
 		log.Fatalf("reading testcase %s: %v", testCaseAbs, err)
+	}
+
+	if *showAST {
+		err := modeledjs.PrintAST(bytes.NewReader(textBytes))
+		if err != nil {
+			log.Fatalf("parsing and printing AST: %v", err)
+		}
 	}
 
 	text := string(textBytes)

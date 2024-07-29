@@ -1615,6 +1615,11 @@ func (vm *VM) evalExpr(expr ast.Expression) (value JSValue, err error) {
 		return value, nil
 
 	case *ast.Identifier:
+		// some well-known identifiers directly resolve to a value without any lookup
+		if expr.Name == "undefined" {
+			return JSUndefined{}, nil
+		}
+
 		value, found := vm.curScope.env.lookupVar(vm.curScope, NameStr(expr.Name))
 		if !found {
 			msg := fmt.Sprintf("undefined variable: %s", expr.Name)

@@ -1,5 +1,0 @@
-{
-  "imports": {
-    "@std/yaml": "jsr:@std/yaml@^0.224.3"
-  }
-}

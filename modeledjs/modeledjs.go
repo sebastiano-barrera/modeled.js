@@ -112,6 +112,16 @@ type Descriptor struct {
 	writable     bool
 }
 
+type ErrUndefinedProperty struct{ name Name }
+
+func (err ErrUndefinedProperty) Error() string {
+	if err.name.isSymbol {
+		return fmt.Sprintf("undefined property: %s", err.name.string)
+	} else {
+		return fmt.Sprintf("undefined property: @%s", err.name.string)
+	}
+}
+
 func (v *JSObject) Category() JSVCategory {
 	if v.funcPart == nil {
 		return VObject
@@ -157,7 +167,7 @@ func (jso *JSObject) GetProperty(name Name, vm *VM) (JSValue, error) {
 	object := jso
 	for {
 		if object == nil {
-			return JSUndefined{}, nil
+			return nil, ErrUndefinedProperty{name: name}
 		}
 		descriptor, isThere := object.getOwnPropertyDescriptor(name)
 		if isThere {
@@ -608,7 +618,7 @@ const (
 type Environment interface {
 	defineVar(scope *Scope, kind DeclKind, name Name, value JSValue)
 	setVar(scope *Scope, name Name, value JSValue, vm *VM) error
-	lookupVar(scope *Scope, name Name) JSValue
+	lookupVar(scope *Scope, name Name) (JSValue, bool)
 	deleteVar(scope *Scope, name Name) bool
 }
 
@@ -682,15 +692,15 @@ func (denv DirectEnv) setVar(scope *Scope, name Name, value JSValue, vm *VM) err
 	return nil
 }
 
-func (denv DirectEnv) lookupVar(scope *Scope, name Name) JSValue {
-	value, defined := denv[name]
-	if defined && value.Category() != VUndefined {
-		return value
+func (denv DirectEnv) lookupVar(scope *Scope, name Name) (value JSValue, defined bool) {
+	value, defined = denv[name]
+	if defined {
+		return
 	}
 	if scope.parent != nil {
 		return scope.parent.env.lookupVar(scope.parent, name)
 	}
-	return JSUndefined{}
+	return nil, false
 }
 
 func (denv DirectEnv) deleteVar(scope *Scope, name Name) bool {
@@ -721,12 +731,14 @@ func (oenv ObjectEnv) setVar(scope *Scope, name Name, value JSValue, vm *VM) err
 	return oenv.SetProperty(name, value, vm)
 }
 
-func (oenv ObjectEnv) lookupVar(scope *Scope, name Name) JSValue {
+func (oenv ObjectEnv) lookupVar(scope *Scope, name Name) (value JSValue, defined bool) {
 	value, err := oenv.GetProperty(name, nil)
-	if err != nil {
+	if _, isUndef := err.(ErrUndefinedProperty); isUndef {
+		return nil, false
+	} else if err != nil {
 		panic("unexpected error in env.LookupVar")
 	}
-	return value
+	return value, true
 }
 
 func (oenv ObjectEnv) deleteVar(scope *Scope, name Name) bool {
@@ -1539,8 +1551,12 @@ func (vm *VM) evalExpr(expr ast.Expression) (value JSValue, err error) {
 		return value, nil
 
 	case *ast.Identifier:
-		value = vm.curScope.env.lookupVar(vm.curScope, NameStr(expr.Name))
-		return
+		value, found := vm.curScope.env.lookupVar(vm.curScope, NameStr(expr.Name))
+		if !found {
+			msg := fmt.Sprintf("undefined variable: %s", expr.Name)
+			err = vm.ThrowError("NameError", msg)
+		}
+		return value, err
 	case *ast.BooleanLiteral:
 		return JSBoolean(expr.Value), nil
 	case *ast.NullLiteral:

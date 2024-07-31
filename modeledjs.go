@@ -936,7 +936,14 @@ func (vm *VM) RunScriptReader(path string, f io.Reader) error {
 func ParseReader(path string, f io.Reader) (*ast.Program, error) {
 	program, err := parser.ParseFile(nil, path, f, 0)
 	if err != nil {
-		return nil, err
+		msg := err.Error()
+		msg, found := strings.CutPrefix(msg, path)
+		if found {
+			msg, _ = strings.CutPrefix(msg, ": ")
+			_, msg, _ = strings.Cut(msg, " ")
+			_, msg, _ = strings.Cut(msg, " ")
+		}
+		return nil, fmt.Errorf("syntax error: %s", msg)
 	}
 
 	err = fixAndCheck(program.File, program)

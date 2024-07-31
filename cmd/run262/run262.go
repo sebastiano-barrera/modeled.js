@@ -233,6 +233,14 @@ func runTestCase(test262Root, testCase string) (errStrict, errSloppy error) {
 				err = vm.RunScriptReader(path, buf)
 			}
 
+			if mt.NegativePhase != "" {
+				if err == nil {
+					err = fmt.Errorf("expected %s error in phase %s, but none were raised", mt.NegativeType, mt.NegativePhase)
+				} else {
+					err = nil
+				}
+			}
+
 			if err != nil {
 				return err
 			}
@@ -256,9 +264,11 @@ func runTestCase(test262Root, testCase string) (errStrict, errSloppy error) {
 }
 
 type Metadata struct {
-	OnlyStrict bool
-	NoStrict   bool
-	Includes   []string
+	OnlyStrict    bool
+	NoStrict      bool
+	Includes      []string
+	NegativePhase string
+	NegativeType  string
 }
 
 func parseMetadata(text []byte) (mt Metadata, err error) {
@@ -278,6 +288,10 @@ func parseMetadata(text []byte) (mt Metadata, err error) {
 	var metadataRaw struct {
 		Flags    []string
 		Includes []string
+		Negative *struct {
+			Phase string
+			Type  string
+		}
 	}
 
 	err = yaml.Unmarshal(metadataYaml, &metadataRaw)
@@ -295,5 +309,10 @@ func parseMetadata(text []byte) (mt Metadata, err error) {
 	}
 
 	mt.Includes = metadataRaw.Includes
+	if metadataRaw.Negative != nil {
+		mt.NegativePhase = metadataRaw.Negative.Phase
+		mt.NegativeType = metadataRaw.Negative.Type
+	}
+
 	return
 }

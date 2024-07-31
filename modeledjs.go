@@ -15,13 +15,6 @@ import (
 	"github.com/robertkrimen/otto/token"
 )
 
-// overview of the plan:
-//
-//  - impl 1: as a naive ast interpreter, validated against test262
-//      - vm state includes stack and heap
-//      - stack identifies variable by names
-//  - impl 2: bytecode interpreter, with coarse instructions
-
 type JSValue interface {
 	Category() JSVCategory
 }
@@ -235,7 +228,7 @@ func (jso *JSObject) GetIndex(ndx uint) (JSValue, error) {
 	if jso.arrayPart != nil {
 		return jso.arrayPart[ndx], nil
 	} else {
-		return jso.GetProperty(NameStr(string(ndx)), nil)
+		return jso.GetProperty(NameStr(fmt.Sprint(ndx)), nil)
 	}
 }
 func (jso *JSObject) SetIndex(ndx int, value JSValue) {
@@ -245,7 +238,7 @@ func (jso *JSObject) SetIndex(ndx int, value JSValue) {
 		}
 		jso.arrayPart[ndx] = value
 	} else {
-		err := jso.SetProperty(NameStr(string(ndx)), value, nil)
+		err := jso.SetProperty(NameStr(fmt.Sprint(ndx)), value, nil)
 		if err != nil {
 			panic("bug: error in SetIndex")
 		}

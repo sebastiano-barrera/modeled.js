@@ -1,0 +1,3 @@
+[submodule "submodules/otto"]
+	path = submodules/otto
+	url = https://github.com/robertkrimen/otto

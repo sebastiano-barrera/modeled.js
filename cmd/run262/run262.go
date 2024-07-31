@@ -148,23 +148,31 @@ type CaseOutcome struct {
 func runMany(test262Root string, testCases []string) (result RunManyResult) {
 	result.Cases = make([]CaseOutcome, 0, len(testCases)*2)
 
-	for _, relPath := range testCases {
-		errStrict, errSloppy := runTestCase(test262Root, relPath)
+	sink := make(chan CaseOutcome)
 
-		result.Cases = append(result.Cases, CaseOutcome{
-			Path:       relPath,
-			StrictMode: true,
-			Success:    (errStrict == nil || errStrict == ErrCaseDisabledInMetadata),
-			Error:      errStrict,
-		})
-		result.Cases = append(result.Cases, CaseOutcome{
-			Path:       relPath,
-			StrictMode: false,
-			Success:    (errSloppy == nil || errSloppy == ErrCaseDisabledInMetadata),
-			Error:      errSloppy,
-		})
+	for _, relPath := range testCases {
+		go func() {
+			errStrict, errSloppy := runTestCase(test262Root, relPath)
+
+			sink <- CaseOutcome{
+				Path:       relPath,
+				StrictMode: true,
+				Success:    (errStrict == nil || errStrict == ErrCaseDisabledInMetadata),
+				Error:      errStrict,
+			}
+			sink <- CaseOutcome{
+				Path:       relPath,
+				StrictMode: false,
+				Success:    (errSloppy == nil || errSloppy == ErrCaseDisabledInMetadata),
+				Error:      errSloppy,
+			}
+		}()
 	}
 
+	for i := 0; i < len(testCases); i++ {
+		co := <-sink
+		result.Cases = append(result.Cases, co)
+	}
 	return
 }
 

@@ -912,7 +912,7 @@ func (vm *VM) withScope(action func()) {
 	vm.curScope = saveScope
 }
 
-func (vm *VM) RunScriptFile(path, text string) error {
+func (vm *VM) RunScriptFile(path string) error {
 	f, err := os.Open(path)
 	if err != nil {
 		return err
@@ -923,12 +923,7 @@ func (vm *VM) RunScriptFile(path, text string) error {
 }
 
 func (vm *VM) RunScriptReader(path string, f io.Reader) error {
-	program, err := parser.ParseFile(nil, path, f, 0)
-	if err != nil {
-		return err
-	}
-
-	err = fixAndCheck(program.File, program)
+	program, err := ParseReader(path, f)
 	if err != nil {
 		return err
 	}
@@ -936,6 +931,19 @@ func (vm *VM) RunScriptReader(path string, f io.Reader) error {
 	vm.synCtx.PushFile(program.File)
 	defer vm.synCtx.PopFile(program.File)
 	return vm.runProgram(program)
+}
+
+func ParseReader(path string, f io.Reader) (*ast.Program, error) {
+	program, err := parser.ParseFile(nil, path, f, 0)
+	if err != nil {
+		return nil, err
+	}
+
+	err = fixAndCheck(program.File, program)
+	if err != nil {
+		return nil, err
+	}
+	return program, nil
 }
 
 func (vm *VM) runProgram(program *ast.Program) error {

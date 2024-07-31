@@ -6,6 +6,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"path"
@@ -21,6 +22,7 @@ var (
 	test262Root = flag.String("test262", "", "Path to the test262 respository")
 	testCase    = flag.String("single", "", "Run this specific testcase (path relative to the test262 root)")
 	showAST     = flag.Bool("showAST", false, "Show the AST of the main script")
+	parseOnly   = flag.Bool("parseOnly", false, "Stop at parsing; test is successful if it parses as expected")
 
 	textSta    string
 	textAssert string
@@ -179,12 +181,11 @@ func runTestCase(test262Root, testCase string) (errStrict, errSloppy error) {
 
 	if *showAST {
 		err := modeledjs.PrintAST(bytes.NewReader(textBytes))
+
 		if err != nil {
 			log.Fatalf("parsing and printing AST: %v", err)
 		}
 	}
-
-	text := string(textBytes)
 
 	mt, err := parseMetadata(textBytes)
 	if err != nil {
@@ -198,26 +199,46 @@ func runTestCase(test262Root, testCase string) (errStrict, errSloppy error) {
 
 		vm := modeledjs.NewVM()
 
-		includes := make([]string, 2+len(mt.Includes))
-		includes[0] = path.Join(test262Root, "harness/sta.js")
-		includes[1] = path.Join(test262Root, "harness/assert.js")
-		for i, incPath := range mt.Includes {
-			includes[i+2] = incPath
+		paths := []string{
+			path.Join(test262Root, "harness/sta.js"),
+			path.Join(test262Root, "harness/assert.js"),
 		}
+		paths = append(paths, mt.Includes...)
+		paths = append(paths, testCaseAbs)
 
-		for _, path := range includes {
-			err = vm.RunScriptFile(path, string(text))
+		for i, path := range paths {
+			var buf *bytes.Buffer
+
+			if i == len(paths)-1 {
+				buf = bytes.NewBufferString("\"use strict\";")
+				io.Copy(buf, bytes.NewReader(textBytes))
+			} else {
+				buf = new(bytes.Buffer)
+
+				f, err := os.Open(path)
+				if err != nil {
+					return err
+				}
+				defer f.Close()
+
+				_, err = io.Copy(buf, f)
+				if err != nil {
+					return err
+				}
+			}
+
+			if *parseOnly {
+				_, err = modeledjs.ParseReader(path, buf)
+			} else {
+				err = vm.RunScriptReader(path, buf)
+			}
+
 			if err != nil {
-				return fmt.Errorf("while running included script %s: %w", path, err)
+				return err
 			}
 		}
 
-		effectiveText := text
-		if forceStrict {
-			effectiveText = "\"use strict\";" + text
-		}
-		rdr := bytes.NewReader([]byte(effectiveText))
-		return vm.RunScriptReader(testCaseAbs, rdr)
+		return nil
 	}
 
 	if mt.NoStrict {

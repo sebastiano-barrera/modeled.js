@@ -33,17 +33,22 @@ func (p *printer) Enter(n ast.Node) (v ast.Visitor) {
 	}
 	t := reflect.TypeOf(n)
 
-	start := n.Idx0() - parserFile.Idx(p.file.Base())
-	end := n.Idx1() - parserFile.Idx(p.file.Base())
-	subSrc := p.file.Source()[start:end]
+	start := n.Idx0() - 1
+	end := n.Idx1() - 1
+	subSrc := ""
+	src := p.file.Source()
+	if int(end) < len(src) {
+		subSrc = src[start:end]
+	}
+
 	if strings.Contains(subSrc, "\n") {
 		subSrc = ""
 	}
 
 	if pos := p.file.Position(n.Idx0()); pos != nil {
-		fmt.Printf("%s:  %s  %s\n", t.String(), pos, subSrc)
+		fmt.Printf("%s:  %s  `%s`\n", t.String(), pos, subSrc)
 	} else {
-		fmt.Printf("%s:  %s  %s\n", t.String(), pos, subSrc)
+		fmt.Printf("%s:  %s  `%s`\n", t.String(), pos, subSrc)
 	}
 
 	p.indent++

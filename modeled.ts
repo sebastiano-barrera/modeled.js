@@ -7,7 +7,7 @@ import * as acorn from "npm:acorn";
 //      - stack identifies variable by names
 //  - impl 2: bytecode interpreter, with coarse instructions
 
-class AssertionError extends Error {}
+class AssertionError extends Error { }
 function assert(value: boolean, msg?: string): asserts value {
 	if (!value) {
 		throw new AssertionError("assertion failed: " + msg);
@@ -27,7 +27,7 @@ function assertIsValue(t: { type: string; value?: any }): asserts t is JSValue {
 	else throw new AssertionError("invalid JSValue");
 }
 
-class VMError extends Error {}
+class VMError extends Error { }
 
 type JSValue =
 	| JSPrimitive
@@ -106,7 +106,7 @@ class VMObject {
 	primitive?: boolean | string | number | bigint | symbol;
 	innerRE?: RegExp;
 
-	constructor(private _proto: VMObject | null = PROTO_OBJECT) {}
+	constructor(private _proto: VMObject | null = PROTO_OBJECT) { }
 
 	resolveDescriptor(descriptor: Descriptor, vm?: VM) {
 		if (descriptor.get !== undefined) {
@@ -140,7 +140,7 @@ class VMObject {
 	getProperty(name: PropName, vm?: VM): JSValue | undefined {
 		assert(typeof name === "string" || typeof name === "symbol");
 
-		let object: VMObject | null = <VMObject> this;
+		let object: VMObject | null = <VMObject>this;
 		let descriptor;
 		do {
 			descriptor = object.getOwnPropertyDescriptor(name);
@@ -157,7 +157,7 @@ class VMObject {
 		assert(typeof value.type === "string");
 
 		let descriptor;
-		for (let obj: VMObject | null = <VMObject> this; obj; obj = obj.proto) {
+		for (let obj: VMObject | null = <VMObject>this; obj; obj = obj.proto) {
 			descriptor = obj.descriptors.get(name);
 			if (descriptor !== undefined) {
 				break;
@@ -1539,17 +1539,15 @@ export class VM {
 			}
 
 			case "ThisExpression": {
-				for (
+				assert(this.currentScope !== null);
+
 					let scope: Scope | null = this.currentScope;
-					scope;
-					scope = scope.parent
-				) {
+				while (scope !== null) {
 					if (scope.this) {
 						return scope.this;
 					}
+					scope = scope.parent
 				}
-
-				assert(this.currentScope !== null);
 
 				const isStrict = this.currentScope.isStrict();
 				return isStrict ? { type: "undefined" } : this.globalObj;
@@ -1611,8 +1609,7 @@ export class VM {
 					return createRegExpFromNative(this, expr.value);
 				} else {
 					throw new VMError(
-						`unsupported literal value: ${typeof expr.value} ${
-							Deno.inspect(expr.value)
+						`unsupported literal value: ${typeof expr.value} ${Deno.inspect(expr.value)
 						}`,
 					);
 				}
@@ -1875,7 +1872,7 @@ export class VM {
 				paramNode.type === "Identifier",
 				"unsupported: func params of type " + paramNode.type,
 			);
-			return (<acorn.Identifier> paramNode).name;
+			return (<acorn.Identifier>paramNode).name;
 		});
 
 		assert(
@@ -2262,10 +2259,12 @@ export class VM {
 			} else throw new VMError('invalid value for arg "order": ' + order);
 
 			if (prim !== undefined) return prim;
-			else {this.throwError(
+			else {
+				this.throwError(
 					"TypeError",
 					"value can't be converted to a primitive",
-				);}
+				);
+			}
 		} else {
 			assert(typeof value.type === "string", "invalid value");
 			return value;
@@ -2558,7 +2557,7 @@ function createGlobalObject() {
 			}
 
 			function parseBool(key: PropName): boolean {
-				const value = (<VMObject> descriptor).getProperty(key);
+				const value = (<VMObject>descriptor).getProperty(key);
 				assert(value !== undefined);
 				if (value.type === "undefined") return true;
 				if (value.type !== "boolean") {

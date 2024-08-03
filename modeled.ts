@@ -51,7 +51,7 @@ interface Node extends acorn.Node {
 class ProgramException extends Error {
 	context: string[];
 
-	constructor(public exceptionValue: JSValue, context: Node[]) {
+	constructor(public exceptionValue: JSValue, context: ContextItem[]) {
 		let message: string | undefined;
 		if (exceptionValue.type === "string") {
 			message = exceptionValue.value;
@@ -67,11 +67,11 @@ class ProgramException extends Error {
 		assert(typeof message === "undefined" || typeof message === "string");
 		super(
 			"interpreted js program exception" +
-				(message ? `: ${message}` : ""),
+			(message ? `: ${message}` : ""),
 		);
 		this.exceptionValue = exceptionValue;
 
-		this.context = context.map((node: Node) => {
+		this.context = context.map(({node, file}: ContextItem) => {
 			assert(node.loc !== null);
 			assert(node.loc !== undefined);
 			assert(node.sourceFile !== undefined);
@@ -79,7 +79,7 @@ class ProgramException extends Error {
 			const text = node.end - node.start <= 100
 				? node.sourceFile.slice(node.start, node.end)
 				: "...";
-			return `${type} - ${start.line}:${start.column}-${end.line}:${end.column} - ${text}`;
+			return `${file}:${start.line}:${start.column}-${end.line}:${end.column}: ${type} - ${text}`;
 		});
 	}
 }
@@ -198,7 +198,7 @@ class VMObject {
 				assert(
 					val === undefined || val instanceof VMInvokable,
 					`invalid descriptor: '${key}' is not a JS function nor undefined: ` +
-						Deno.inspect(val),
+					Deno.inspect(val),
 				);
 			}
 		}
@@ -206,8 +206,8 @@ class VMObject {
 		for (const key of ["writable", "configurable", "enumerable"]) {
 			assert(
 				key === "writable" ||
-					key === "configurable" ||
-					key === "enumerable",
+				key === "configurable" ||
+				key === "enumerable",
 			);
 			if (descriptor[key] === undefined) descriptor[key] = true;
 			assert(
@@ -557,7 +557,7 @@ PROTO_STRING.setProperty(
 		} else {
 			return vm.throwTypeError(
 				"String.prototype.replace: invalid type for argument #2: " +
-					arg1.type,
+				arg1.type,
 			);
 		}
 
@@ -839,11 +839,17 @@ class EnvScope extends Scope {
 	}
 }
 
+interface ContextItem {
+	node: Node;
+	file: string;
+}
+
 export class VM {
 	globalObj = createGlobalObject();
 	currentScope: Scope | null = null;
-	synCtx: Node[] = [];
+	synCtx: ContextItem[] = [];
 	synCtxError: string[] = [];
+	synCtxFilenames: string[] = [];
 
 	//
 	// VM state (variables, stack, heap, ...)
@@ -891,8 +897,13 @@ export class VM {
 
 	#withSyntaxContext<T>(node: Node, inner: () => T): T {
 		this.synCtxError = [];
+		const file = this.synCtxFilenames[this.synCtxFilenames.length - 1];
+		assert (file !== undefined);
+
+		const ctxItem: ContextItem = {node, file};
+
 		try {
-			this.synCtx.push(node);
+			this.synCtx.push(ctxItem);
 			return inner();
 		} catch (err) {
 			assert(node.loc !== null && node.loc !== undefined);
@@ -910,7 +921,7 @@ export class VM {
 			throw err;
 		} finally {
 			const check = this.synCtx.pop();
-			assert(check === node, "bug! syntax context manipulated");
+			assert(Object.is(check, ctxItem), "bug! syntax context manipulated");
 		}
 	}
 
@@ -918,14 +929,21 @@ export class VM {
 	// Statements
 	//
 
-	runScript({ text }: { path: string; text: string }) {
+	runScript({ text, path }: { path: string; text: string }) {
 		const ast = acorn.parse(text, {
 			ecmaVersion: "latest",
 			directSourceFile: text,
 			locations: true,
 		});
 
-		return this.runProgram(ast);
+		this.synCtxFilenames.push(path);
+		try {
+			return this.runProgram(ast);
+		} finally {
+			const check = this.synCtxFilenames.pop();
+			assert(Object.is(check, path));
+		}
+
 	}
 
 	runProgram(node: acorn.Program) {
@@ -1020,13 +1038,16 @@ export class VM {
 		assert(
 			callee instanceof VMInvokable,
 			"you can only call a function (native or virtual), not " +
-				Deno.inspect(callee),
+			Deno.inspect(callee),
 		);
 		return callee.invoke(this, subject, args);
 	}
 
 	runStmt(node: acorn.Node): JSValue {
-		const stmt = <acorn.Statement> node;
+		return this.#withSyntaxContext(node, () => this._runStmt(node))
+	}
+	_runStmt(node: acorn.Node): JSValue {
+		const stmt = <acorn.Statement>node;
 		switch (stmt.type) {
 			// each of these handlers returns the *completion value* of the statement (if any)
 
@@ -1096,7 +1117,7 @@ export class VM {
 				} else {
 					throw new VMError(
 						"unsupported identifier for function declaration: " +
-							Deno.inspect(stmt.id),
+						Deno.inspect(stmt.id),
 					);
 				}
 
@@ -1222,6 +1243,9 @@ export class VM {
 	// Expressions
 	//
 	evalExpr(expr: acorn.Expression): JSValue {
+		return this.#withSyntaxContext(expr, () => this._evalExpr(expr))
+	}
+	_evalExpr(expr: acorn.Expression): JSValue {
 		assert(this.currentScope !== null);
 
 		switch (expr.type) {
@@ -1233,7 +1257,7 @@ export class VM {
 				} else if (expr.operator === "+=") {
 					assert(
 						expr.left.type === "Identifier" ||
-							expr.left.type === "MemberExpression",
+						expr.left.type === "MemberExpression",
 					);
 					value = this.binExpr("+", expr.left, expr.right);
 				} else {
@@ -1541,7 +1565,7 @@ export class VM {
 			case "ThisExpression": {
 				assert(this.currentScope !== null);
 
-					let scope: Scope | null = this.currentScope;
+				let scope: Scope | null = this.currentScope;
 				while (scope !== null) {
 					if (scope.this) {
 						return scope.this;
@@ -1887,7 +1911,7 @@ export class VM {
 		}
 
 		if (!func.isStrict && body.type === "BlockStatement") {
-			const stmts = (<acorn.BlockStatement> body).body;
+			const stmts = (<acorn.BlockStatement>body).body;
 			if (
 				stmts.length > 0 &&
 				stmts[0].type === "ExpressionStatement" &&
@@ -1948,7 +1972,8 @@ export class VM {
 
 			const objx = targetExpr.object;
 			assert(objx.type !== "Super", "`super` not supported");
-			const obj = this.coerceToObject(this.evalExpr(objx));
+			const objVal = this.evalExpr(objx);
+			const obj = this.coerceToObject(objVal);
 
 			let property: JSValue;
 			if (targetExpr.computed) {
@@ -1961,7 +1986,7 @@ export class VM {
 				assert(
 					targetExpr.property.type === "Identifier",
 					"unsupported non-computed member property: " +
-						targetExpr.property.type,
+					targetExpr.property.type,
 				);
 				const propertyName = targetExpr.property.name;
 				property = { type: "string", value: propertyName };
@@ -2797,9 +2822,9 @@ function createGlobalObject() {
 		const body: acorn.Statement[] = ast.body.map((item) => {
 			assert(
 				item.type !== "ImportDeclaration" &&
-					item.type !== "ExportNamedDeclaration" &&
-					item.type !== "ExportDefaultDeclaration" &&
-					item.type !== "ExportAllDeclaration",
+				item.type !== "ExportNamedDeclaration" &&
+				item.type !== "ExportDefaultDeclaration" &&
+				item.type !== "ExportAllDeclaration",
 			);
 			return item;
 		});

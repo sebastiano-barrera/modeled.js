@@ -15,6 +15,7 @@ import (
 	// "com.github.sebastianobarrera.modeledjs/modeledjs"
 
 	"com.github.sebastianobarrera.modeledjs/modeledjs"
+	tsparser "com.github.sebastianobarrera.modeledjs/modeledjs/ts-parser"
 	yaml "gopkg.in/yaml.v3"
 )
 
@@ -236,7 +237,7 @@ func runTestCase(test262Root, testCase string) (errStrict, errSloppy error) {
 			}
 
 			if *parseOnly {
-				_, err = modeledjs.ParseReader(path, buf)
+				err = tsparser.ParseBytes(path, buf.Bytes())
 			} else {
 				err = vm.RunScriptReader(path, buf)
 			}

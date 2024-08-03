@@ -64,8 +64,6 @@ if (args.single) {
   for (const {path, message} of skips) {
     console.log(`%c - ${path}: ${message}`, 'color: yellow')
   }
-  
-  const LINE_COUNT_LIMIT = 20
 
   if (failures.length === 0) {
     console.log('%c     NO FAILURES, IT ALL AL WORKS LFGGGGGG ', 'color: cyan')
@@ -74,14 +72,12 @@ if (args.single) {
     console.log('')
     console.log(`${failures.length} failures:`)
     for (const oc of failures) {
-      console.log(`%c --- ${oc.testcase}`, 'color: red')
+      console.log(`%ccase\t${oc.testcase}`, 'color: red')
 
       const lines = oc.error.toString().split('\n');
-      for (const line of lines.slice(0, LINE_COUNT_LIMIT)) {
-        console.log('   | ' + line)
-      }
-      if (lines.length > LINE_COUNT_LIMIT) {
-        console.log('   | ...')
+      for (let i=0; i < lines.length; i++) {
+        const tag = i == 0 ? "error" : "ectx";
+        console.log(`${tag}\t${lines[i]}`);
       }
     }
   }

@@ -1661,8 +1661,7 @@ export class VM {
 
 			while (obj !== null) {
 				const check = obj.getProperty("constructor");
-				if (!(check instanceof VMObject)) continue;
-				if (check.is(constructor)) {
+				if (check instanceof VMObject && check.is(constructor)) {
 					return { type: "boolean", value: true };
 				}
 				obj = obj.proto;

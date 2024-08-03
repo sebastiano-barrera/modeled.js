@@ -12,6 +12,8 @@ import (
 	"path"
 	"strings"
 
+	"runtime/pprof"
+
 	// "com.github.sebastianobarrera.modeledjs/modeledjs"
 
 	"com.github.sebastianobarrera.modeledjs/modeledjs"
@@ -24,6 +26,7 @@ var (
 	testCase    = flag.String("single", "", "Run this specific testcase (path relative to the test262 root)")
 	showAST     = flag.Bool("showAST", false, "Show the AST of the main script")
 	parseOnly   = flag.Bool("parseOnly", false, "Stop at parsing; test is successful if it parses as expected")
+	cpuProfile  = flag.String("cpuProfile", "", "Write CPU profile to this file")
 
 	textSta    string
 	textAssert string
@@ -33,6 +36,15 @@ var (
 
 func main() {
 	flag.Parse()
+
+	if *cpuProfile != "" {
+		cpuf, err := os.Create(*cpuProfile)
+		if err != nil {
+			log.Fatalf("can't create cpu profile file: %s: %s", *cpuProfile, err)
+		}
+		pprof.StartCPUProfile(cpuf)
+		defer pprof.StopCPUProfile()
+	}
 
 	if *test262Root == "" {
 		log.Fatalf("command line argument is required: -test262 (see -help)")

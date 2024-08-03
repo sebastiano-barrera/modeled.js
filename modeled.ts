@@ -14,6 +14,7 @@ function assert(value: boolean, msg?: string): asserts value {
   }
 }
 
+// deno-lint-ignore no-explicit-any
 function assertIsValue(t: { type: string; value?: any }): asserts t is JSValue {
   if (t.type === "string") assert(t.value === "string");
   else if (t.type === "null") assert(t.value === undefined);
@@ -39,10 +40,14 @@ type JSValue =
 
 type PrimType = JSValue["type"];
 
+interface Node extends acorn.Node {
+  sourceFile?: string;
+}
+
 class ProgramException extends Error {
   context: string[];
 
-  constructor(public exceptionValue: JSValue, context: acorn.Node[]) {
+  constructor(public exceptionValue: JSValue, context: Node[]) {
     let message: string | undefined;
     if (exceptionValue.type === "string") {
       message = exceptionValue.value;
@@ -62,12 +67,13 @@ class ProgramException extends Error {
     );
     this.exceptionValue = exceptionValue;
 
-    this.context = context.map((node: acorn.Node) => {
-      assert(typeof node.loc !== "object" && node.loc !== null);
+    this.context = context.map((node: Node) => {
       assert(node.loc !== null);
+      assert(node.loc !== undefined);
+      assert(node.sourceFile !== undefined);
       const { loc: { start, end }, type } = node;
       const text = node.end - node.start <= 100
-        ? node.sourceFile.getRange(node.start, node.end)
+        ? node.sourceFile.slice(node.start, node.end)
         : "...";
       return `${type} - ${start.line}:${start.column}-${end.line}:${end.column} - ${text}`;
     });
@@ -484,7 +490,7 @@ class VMFunction extends VMInvokable {
   name: string | null = null;
   functionID: number = ++VMFunction.#lastID;
 
-  constructor(public params: string[], public body: acorn.Node) {
+  constructor(public params: string[], public body: Node) {
     super();
   }
 
@@ -504,10 +510,6 @@ class VMFunction extends VMInvokable {
 
     return { type: "undefined" };
   }
-}
-
-function assertOr(condition: boolean, action: () => never): asserts condition {
-  if (!condition) action();
 }
 
 PROTO_STRING.setProperty(
@@ -830,7 +832,7 @@ class EnvScope extends Scope {
 export class VM {
   globalObj = createGlobalObject();
   currentScope: Scope | null = null;
-  synCtx: acorn.Node[] = [];
+  synCtx: Node[] = [];
   synCtxError: string[] = [];
 
   //
@@ -877,21 +879,23 @@ export class VM {
     });
   }
 
-  #unsupportedNode(node: acorn.Node) {
+  #unsupportedNode(node: Node): never {
     throw new VMError("unsupported node: " + Deno.inspect(node));
   }
 
-  #withSyntaxContext<T>(node: acorn.Node, inner: () => T): T {
+  #withSyntaxContext<T>(node: Node, inner: () => T): T {
     this.synCtxError = [];
     try {
       this.synCtx.push(node);
       return inner();
     } catch (err) {
+      assert(node.loc !== null && node.loc !== undefined);
+      assert(node.sourceFile !== undefined);
       this.synCtxError.push(
         `${node.type} ${node.loc.start.line}-${node.loc.end.line}`,
       );
       if (node.end - node.start <= 100) {
-        const excerpt = node.sourceFile.getRange(node.start, node.end);
+        const excerpt = node.sourceFile.slice(node.start, node.end);
         for (const line of excerpt.split("\n")) {
           this.synCtxError.push("  > " + line);
         }
@@ -911,7 +915,7 @@ export class VM {
   runScript({ text }: { path: string; text: string }) {
     const ast = acorn.parse(text, {
       ecmaVersion: "latest",
-      directSourceFile: new SourceWrapper(text),
+      directSourceFile: text,
       locations: true,
     });
 
@@ -930,7 +934,11 @@ export class VM {
         this.currentScope = topScope;
         this.currentScope.this = this.globalObj;
 
-        if (node.body.length > 0 && node.body[0].directive === "use strict") {
+        if (
+          node.body.length > 0 &&
+          node.body[0].type === "ExpressionStatement" &&
+          node.body[0].directive === "use strict"
+        ) {
           this.currentScope.isSetStrict = true;
         }
 
@@ -970,7 +978,7 @@ export class VM {
     try {
       ast = acorn.parse(text, {
         ecmaVersion: "latest",
-        directSourceFile: new SourceWrapper(text),
+        directSourceFile: text,
         locations: true,
       });
     } catch (err) {
@@ -993,37 +1001,28 @@ export class VM {
     });
   }
 
-  runBlockBody(body: acorn.Program["body"]) {
-    let completion;
-
+  runBlockBody(body: acorn.Program["body"]): JSValue {
+    let completion: JSValue = { type: "undefined" };
     for (const stmt of body) {
       // last iteration's CV becomes block's CV
       completion = this.runStmt(stmt);
     }
-
     return completion;
   }
 
-  runStmt(stmt: acorn.Statement) {
-    const completionValue = this.#dispatch(stmt, this.stmts);
-    if (typeof completionValue === "undefined") {
-      return { type: "undefined" }; // default completion value
-    }
-    return completionValue;
-  }
-
-  performCall(callee, subject, args) {
+  performCall(callee: VMInvokable, subject: JSValue, args: JSValue[]) {
     assert(
       callee instanceof VMInvokable,
       "you can only call a function (native or virtual), not " +
         Deno.inspect(callee),
     );
-    assert(subject.type, "subject should be a VM value");
-
     return callee.invoke(this, subject, args);
   }
 
-  #dispatch(node: acorn.Node, table: { [_: string]: (_: acorn.Node) => void }) {
+  #dispatch<T extends Node>(
+    node: T,
+    table: NodeDispatcher<T>,
+  ): JSValue | undefined {
     return this.#withSyntaxContext(node, () => {
       const handler = table[node.type];
       if (handler) return handler.call(this, node);
@@ -1031,186 +1030,830 @@ export class VM {
     });
   }
 
-  stmts = {
-    // each of these handlers returns the *completion value* of the statement (if any)
+  runStmt(node: acorn.Node): JSValue {
+    const stmt = <acorn.Statement> node;
+    switch (stmt.type) {
+      // each of these handlers returns the *completion value* of the statement (if any)
 
-    EmptyStatement(stmt: acorn.EmptyStatement) {},
+      case "EmptyStatement":
+        return { type: "undefined" };
 
-    /** @this VM */
-    BlockStatement(stmt: acorn.BlockStatement) {
-      return this.withScope(() => {
-        return this.runBlockBody(stmt.body);
-      });
-    },
+      case "BlockStatement":
+        return this.withScope(() => {
+          return this.runBlockBody(stmt.body);
+        });
 
-    /** @this VM */
-    TryStatement(stmt: acorn.TryStatement) {
-      try {
-        return this.withScope(() => this.runStmt(stmt.block));
-      } catch (err) {
-        if (err instanceof ProgramException && stmt.handler) {
-          assert(
-            stmt.handler.type === "CatchClause",
-            "parser bug: try statement's handler must be CatchClause",
-          );
-          assert(
-            stmt.handler.param.type === "Identifier",
-            "only supported: catch clause param Identifier",
-          );
+      case "TryStatement":
+        try {
+          return this.withScope(() => this.runStmt(stmt.block));
+        } catch (err) {
+          if (err instanceof ProgramException && stmt.handler) {
+            assert(
+              stmt.handler.type === "CatchClause",
+              "parser bug: try statement's handler must be CatchClause",
+            );
+            assert(
+              stmt.handler.param !== null && stmt.handler.param !== undefined,
+            );
+            assert(
+              stmt.handler.param.type === "Identifier",
+              "only supported: catch clause param Identifier",
+            );
 
-          const paramName = stmt.handler.param.name;
-          const body = stmt.handler.body;
-          this.withScope(() => {
-            this.defineVar("var", paramName, err.exceptionValue);
-            this.setDoNotDelete(paramName);
-            this.runStmt(body);
-          });
-        } else {
-          // either pass the ProgramException to another of the program's try blocks
-          // or pass the VMError to the VM caller
-          throw err;
-        }
-      } finally {
-        if (stmt.finalizer) {
-          this.withScope(() => this.runStmt(stmt.finalizer));
-        }
-      }
-    },
-    ThrowStatement(stmt: acorn.ThrowStatement) {
-      const exceptionValue = this.evalExpr(stmt.argument);
-      throw new ProgramException(exceptionValue, [...this.synCtx]);
-    },
-
-    FunctionDeclaration(stmt) {
-      if (stmt.id.type === "Identifier") {
-        const name = stmt.id.name;
-        assert(!stmt.expression, "unsupported func decl type: expression");
-        assert(!stmt.generator, "unsupported func decl type: generator");
-        assert(!stmt.async, "unsupported func decl type: async");
-
-        const func = this.makeFunction(stmt.params, stmt.body);
-        assert(typeof name === "string");
-        func.setProperty("name", { type: "string", value: name });
-        this.defineVar("var", name, func);
-
-        return func;
-      } else {
-        throw new VMError(
-          "unsupported identifier for function declaration: " +
-            Deno.inspect(stmt.id),
-        );
-      }
-    },
-
-    ExpressionStatement(stmt: acorn.ExpressionStatement) {
-      // expression value becomes completion value
-      return this.evalExpr(stmt.expression);
-    },
-
-    IfStatement(stmt: acorn.IfStatement) {
-      const test = this.evalExpr(stmt.test);
-
-      if (this.isTruthy(test)) {
-        return this.runStmt(stmt.consequent);
-      } else if (stmt.alternate) {
-        return this.runStmt(stmt.alternate);
-      }
-    },
-
-    VariableDeclaration(node: acorn.VariableDeclaration) {
-      if (node.kind !== "var" && node.kind !== "let" && node.kind !== "const") {
-        throw new VMError("unsupported var decl type: " + node.kind);
-      }
-
-      let completion;
-
-      for (const decl of node.declarations) {
-        assert(
-          decl.type === "VariableDeclarator",
-          "decl type must be VariableDeclarator",
-        );
-        if (decl.id.type === "Identifier") {
-          const name = decl.id.name;
-          const value = decl.init
-            ? this.evalExpr(decl.init)
-            : { type: "undefined" };
-          this.defineVar(node.kind, name, value);
-
-          if (node.declarations.length === 1) {
-            completion = value;
+            const paramName = stmt.handler.param.name;
+            const body = stmt.handler.body;
+            return this.withScope(() => {
+              this.defineVar("var", paramName, err.exceptionValue);
+              this.setDoNotDelete(paramName);
+              return this.runStmt(body);
+            });
+          } else {
+            // either pass the ProgramException to another of the program's try blocks
+            // or pass the VMError to the VM caller
+            throw err;
           }
-        } else {
-          throw new VMError("unsupported declarator id type: " + decl.id.type);
+        } finally {
+          this.withScope(() => {
+            if (stmt.finalizer !== null && stmt.finalizer !== undefined) {
+              return this.runStmt(stmt.finalizer);
+            }
+          });
         }
+
+      case "ThrowStatement": {
+        const exceptionValue = this.evalExpr(stmt.argument);
+        throw new ProgramException(exceptionValue, [...this.synCtx]);
       }
 
-      return completion;
-    },
+      case "FunctionDeclaration":
+        if (stmt.id.type === "Identifier") {
+          const name = stmt.id.name;
+          assert(!stmt.expression, "unsupported func decl type: expression");
+          assert(!stmt.generator, "unsupported func decl type: generator");
+          assert(!stmt.async, "unsupported func decl type: async");
 
-    ReturnStatement(node: acorn.ReturnStatement) {
-      if (node.argument === null) {
-        throw { returnValue: { type: "undefined" } };
+          const func = this.makeFunction(stmt.params, stmt.body);
+          assert(typeof name === "string");
+          func.setProperty("name", { type: "string", value: name });
+          this.defineVar("var", name, func);
+
+          return func;
+        } else {
+          throw new VMError(
+            "unsupported identifier for function declaration: " +
+              Deno.inspect(stmt.id),
+          );
+        }
+
+      case "ExpressionStatement":
+        // expression value becomes completion value
+        return this.evalExpr(stmt.expression);
+
+      case "IfStatement": {
+        const test = this.evalExpr(stmt.test);
+
+        if (this.isTruthy(test)) {
+          return this.runStmt(stmt.consequent);
+        } else if (stmt.alternate) {
+          return this.runStmt(stmt.alternate);
+        }
+        return { type: "undefined" };
       }
 
-      const returnValue = this.evalExpr(node.argument);
-      throw { returnValue };
-    },
-
-    /** @this VM */
-    ForStatement(node: acorn.ForStatement) {
-      this.withScope(() => {
-        let completion;
-
-        for (
-          node.init.type === "VariableDeclaration"
-            ? this.runStmt(node.init)
-            : this.evalExpr(node.init);
-          this.isTruthy(this.evalExpr(node.test));
-          this.evalExpr(node.update)
+      case "VariableDeclaration": {
+        if (
+          stmt.kind !== "var" && stmt.kind !== "let" && stmt.kind !== "const"
         ) {
-          // keep overwriting, return the last iteration's completion value
-          completion = this.runStmt(node.body);
+          throw new VMError("unsupported var decl type: " + stmt.kind);
+        }
+
+        let completion: JSValue = { type: "undefined" };
+
+        for (const decl of stmt.declarations) {
+          assert(
+            decl.type === "VariableDeclarator",
+            "decl type must be VariableDeclarator",
+          );
+          if (decl.id.type === "Identifier") {
+            const name = decl.id.name;
+            const value: JSValue = decl.init
+              ? this.evalExpr(decl.init)
+              : { type: "undefined" };
+            this.defineVar(stmt.kind, name, value);
+
+            if (stmt.declarations.length === 1) {
+              completion = value;
+            }
+          } else {
+            throw new VMError(
+              "unsupported declarator id type: " + decl.id.type,
+            );
+          }
         }
 
         return completion;
-      });
-    },
+      }
 
-    ForInStatement(node: acorn.ForInStatement) {
-      const iteree = this.evalExpr(node.right);
-      this.withScope(() => {
-        this.runStmt(node.left);
-
-        assert(node.left.type === "VariableDeclaration");
-        assert(node.left.declarations.length === 1);
-        assert(node.left.declarations[0].type === "VariableDeclarator");
-        assert(node.left.declarations[0].init === null);
-        assert(node.left.declarations[0].id.type === "Identifier");
-        const asmtTarget = node.left.declarations[0].id;
-
-        const properties = iteree.getOwnPropertyNames();
-        for (const name of properties) {
-          assert(typeof name === "string");
-          const value = iteree.getOwnProperty(name);
-          this.doAssignment(asmtTarget, value);
-          this.runStmt(node.body);
+      case "ReturnStatement": {
+        if (stmt.argument === undefined || stmt.argument === null) {
+          throw { returnValue: { type: "undefined" } };
         }
-      });
-    },
-  };
+        const returnValue = this.evalExpr(stmt.argument);
+        throw { returnValue };
+      }
+
+      case "ForStatement":
+        return this.withScope(() => {
+          let completion: JSValue = { type: "undefined" };
+
+          if (stmt.init !== null && stmt.init !== undefined) {
+            if (stmt.init.type === "VariableDeclaration") {
+              this.runStmt(stmt.init);
+            } else this.evalExpr(stmt.init);
+          }
+
+          while (
+            stmt.test === null || stmt.test === undefined ||
+            this.isTruthy(this.evalExpr(stmt.test))
+          ) {
+            // keep overwriting, return the last iteration's completion value
+            completion = this.runStmt(stmt.body);
+            if (stmt.update !== null && stmt.update !== undefined) {
+              this.evalExpr(stmt.update);
+            }
+          }
+
+          return completion;
+        });
+
+      case "ForInStatement": {
+        const iteree = this.evalExpr(stmt.right);
+        return this.withScope(() => {
+          assert(
+            stmt.left.type === "VariableDeclaration",
+            "in for(...in...) statement: patterns not supported",
+          );
+          this.runStmt(stmt.left);
+
+          assert(stmt.left.type === "VariableDeclaration");
+          assert(stmt.left.declarations.length === 1);
+          assert(stmt.left.declarations[0].type === "VariableDeclarator");
+          assert(stmt.left.declarations[0].init === null);
+          assert(stmt.left.declarations[0].id.type === "Identifier");
+          const asmtTarget = stmt.left.declarations[0].id;
+
+          assert(iteree instanceof VMObject);
+          const properties = iteree.getOwnPropertyNames();
+          for (const name of properties) {
+            assert(typeof name === "string");
+            const value = iteree.getOwnProperty(name);
+            this.doAssignment(asmtTarget, value);
+            this.runStmt(stmt.body);
+          }
+
+          return { type: "undefined" };
+        });
+      }
+      default:
+        throw new VMError("not a (supported) statement: " + stmt.type);
+    }
+  }
 
   //
   // Expressions
   //
-  evalExpr(node) {
-    const value = this.#dispatch(node, this.exprs);
-    assert(
-      typeof value === "object" && typeof value.type === "string",
-      `expr handler for ${node.type} did not return a value: ${
-        Deno.inspect(value)
-      }`,
-    );
-    return value;
+  evalExpr(expr: acorn.Expression): JSValue {
+    assert(this.currentScope !== null);
+
+    switch (expr.type) {
+      case "AssignmentExpression": {
+        let value = this.evalExpr(expr.right);
+
+        if (expr.operator === "=") {
+          // no update
+        } else if (expr.operator === "+=") {
+          assert(
+            expr.left.type === "Identifier" ||
+              expr.left.type === "MemberExpression",
+          );
+          value = this.binExpr("+", expr.left, expr.right);
+        } else {
+          throw new VMError(
+            "unsupported update assignment op. " + Deno.inspect(expr),
+          );
+        }
+
+        return this.doAssignment(expr.left, value);
+      }
+
+      case "UpdateExpression": {
+        const value = this.evalExpr(expr.argument);
+        if (value.type !== "number") {
+          this.throwTypeError(
+            `update operation only support on numbers, not ${value.type}`,
+          );
+        }
+
+        let newValue;
+        if (expr.operator === "++") {
+          newValue = { type: "number", value: value.value + 1 };
+        } else if (expr.operator === "--") {
+          newValue = { type: "number", value: value.value - 1 };
+        } else {
+          throw new VMError("unsupported update operator: " + expr.operator);
+        }
+
+        return this.doAssignment(expr.argument, newValue);
+      }
+
+      case "FunctionExpression": {
+        assert(
+          expr.id === null,
+          "unsupported: function expression with non-null id: " + expr.id,
+        );
+        assert(!expr.expression, "unsupported: FunctionExpression.expression");
+        assert(!expr.generator, "unsupported: FunctionExpression.generator");
+        assert(!expr.async, "unsupported: FunctionExpression.async");
+
+        return this.makeFunction(expr.params, expr.body);
+      }
+
+      case "ObjectExpression": {
+        const obj = new VMObject();
+
+        for (const propertyNode of expr.properties) {
+          assert(
+            propertyNode.type === "Property",
+            "node's type === 'Property'",
+          );
+          assert(propertyNode.method === false, "node's method === false");
+          assert(
+            propertyNode.shorthand === false,
+            "node's shorthand === false",
+          );
+          assert(propertyNode.computed === false, "node's computed === false");
+
+          assert(propertyNode.key.type === "Identifier");
+          const key = propertyNode.key.name;
+
+          if (propertyNode.kind === "init") {
+            const value = this.evalExpr(propertyNode.value);
+            obj.setProperty(key, value);
+          } else if (
+            propertyNode.kind === "get" || propertyNode.kind === "set"
+          ) {
+            const func = this.evalExpr(propertyNode.value);
+            if (!(func instanceof VMInvokable)) {
+              throw new VMError(
+                "VM bug: getter/setter was not evaluated as function?",
+              );
+            }
+            obj.defineProperty(key, {
+              [propertyNode.kind]: func,
+              configurable: false,
+              enumerable: false,
+              writable: false,
+            });
+          } else {
+            throw new VMError(
+              "unsupported property kind: " + propertyNode.kind,
+            );
+          }
+        }
+
+        return obj;
+      }
+
+      case "ArrayExpression": {
+        const elements = expr.elements.map((elmNode) => {
+          assert(elmNode !== null);
+          assert(elmNode.type !== "SpreadElement");
+          return this.evalExpr(elmNode);
+        });
+
+        const arrayCons = this.globalObj.getProperty("Array");
+        assert(arrayCons instanceof VMInvokable);
+        const array = this.performNew(arrayCons, []);
+        const pushMethod = array.getProperty("push");
+        assert(pushMethod instanceof VMInvokable);
+        for (const elm of elements) {
+          this.performCall(pushMethod, array, [elm]);
+        }
+
+        return array;
+      }
+
+      case "MemberExpression": {
+        assert(!expr.optional, "unsupported: MemberExpression.optional");
+
+        assert(expr.object.type !== "Super");
+        const object = this.coerceToObject(this.evalExpr(expr.object));
+
+        let val;
+        if (expr.computed) {
+          assert(expr.property.type !== "PrivateIdentifier");
+          const key = this.evalExpr(expr.property);
+          if (key.type === "string") {
+            val = object.getProperty(key.value, this);
+          } else if (key.type === "number") {
+            val = object.getIndex(key.value);
+          } else {
+            throw new AssertionError(
+              "MemberExpression: unsupported key type: " + key.type,
+            );
+          }
+        } else if (expr.property.type === "Identifier") {
+          val = object.getProperty(expr.property.name, this);
+        } else {
+          throw new AssertionError(
+            "MemberExpression: !computed, but property not an Identifier",
+          );
+        }
+
+        if (val === undefined) return { type: "undefined" };
+        return val;
+      }
+
+      case "UnaryExpression": {
+        if (expr.operator === "delete") {
+          assert(expr.prefix, "parser bug: delete must be prefix");
+          if (expr.argument.type === "Identifier") {
+            const name = expr.argument.name;
+            const didDelete = this.deleteVar(name);
+            return { type: "boolean", value: didDelete };
+          } else if (expr.argument.type === "MemberExpression") {
+            assert(expr.argument.object.type !== "Super");
+            const obj = this.evalExpr(expr.argument.object);
+            if (!(obj instanceof VMObject)) {
+              this.throwTypeError("can't delete from non-object");
+            }
+
+            let property;
+            assert(expr.argument.property.type !== "PrivateIdentifier");
+            if (expr.argument.computed) {
+              const nameValue = this.evalExpr(expr.argument.property);
+              if (nameValue.type !== "string") {
+                this.throwTypeError("property type is not string");
+              }
+              property = nameValue.value;
+            } else {
+              assert(expr.argument.property.type === "Identifier");
+              property = expr.argument.property.name;
+            }
+
+            const ret = obj.deleteProperty(property);
+            return { type: "boolean", value: ret };
+          } else {
+            throw new VMError(
+              "unsupported delete argument: " + Deno.inspect(expr),
+            );
+          }
+        } else if (expr.operator === "typeof") {
+          const value = this.evalExpr(expr.argument);
+          return { type: "string", value: value.type };
+        } else if (expr.operator === "!") {
+          assert(expr.prefix === true, "only supported: expr.prefix === true");
+          const value = this.coerceToBoolean(this.evalExpr(expr.argument));
+          assert(typeof value === "boolean");
+          return { type: "boolean", value: !value };
+        } else if (expr.operator === "+") {
+          const value = this.coerceNumeric(this.evalExpr(expr.argument));
+          switch (value.type) {
+            case "number":
+              return { type: "number", value };
+            case "bigint":
+              return { type: "bigint", value };
+            default:
+              return { type: "undefined" };
+          }
+        } else if (expr.operator === "-") {
+          const value = this.coerceNumeric(this.evalExpr(expr.argument));
+          if (typeof value === "number") {
+            return { type: "number", value: -value };
+          }
+          assert(typeof value === "bigint");
+          return { type: "bigint", value: -value };
+        } else if (expr.operator === "void") {
+          // evaluate and discard
+          this.evalExpr(expr.argument);
+          return { type: "undefined" };
+        } else {
+          throw new VMError("unsupported unary op: " + expr.operator);
+        }
+      }
+
+      case "BinaryExpression":
+        assert(expr.left.type !== "PrivateIdentifier");
+        return this.binExpr(expr.operator, expr.left, expr.right);
+
+      case "LogicalExpression": {
+        if (expr.operator === "||") {
+          const left = this.evalExpr(expr.left);
+          if (this.isTruthy(left)) return left;
+          return this.evalExpr(expr.right);
+        } else if (expr.operator === "&&") {
+          const left = this.evalExpr(expr.left);
+          if (!this.isTruthy(left)) return left;
+          return this.evalExpr(expr.right);
+        } else {
+          throw new VMError("unsupported logical op: " + expr.operator);
+        }
+      }
+
+      case "ConditionalExpression": {
+        const testValue = this.evalExpr(expr.test);
+        const test = this.coerceToBoolean(testValue);
+        // don't even eval the non-taken branch
+        if (test) return this.evalExpr(expr.consequent);
+        else return this.evalExpr(expr.alternate);
+      }
+
+      case "NewExpression": {
+        const constructor = this.evalExpr(expr.callee);
+        const args = expr.arguments.map((argNode) => {
+          assert(argNode.type !== "SpreadElement");
+          return this.evalExpr(argNode);
+        });
+        assert(constructor instanceof VMInvokable);
+        return this.performNew(constructor, args);
+      }
+
+      case "CallExpression": {
+        const args = expr.arguments.map((argNode) => {
+          assert(argNode.type !== "SpreadElement");
+          return this.evalExpr(argNode);
+        });
+        let callThis: JSValue;
+        let callee;
+
+        if (
+          expr.callee.type === "MemberExpression" &&
+          expr.callee.property.type === "Identifier"
+        ) {
+          assert(
+            !expr.callee.computed,
+            "only supported: member call with !computed",
+          );
+          assert(
+            !expr.callee.optional,
+            "only supported: member call with !optional",
+          );
+
+          const name = expr.callee.property.name;
+
+          assert(expr.callee.object.type !== "Super");
+          callThis = this.evalExpr(expr.callee.object);
+          callThis = this.coerceToObject(callThis);
+          callee = callThis.getProperty(name);
+          if (callee === undefined) {
+            throw new VMError(
+              `can't find method ${name} in ${Deno.inspect(callThis)}`,
+            );
+          }
+        } else if (
+          expr.callee.type === "Identifier" && expr.callee.name === "eval"
+        ) {
+          // don't lookup "eval" as a variable, perform "direct eval"
+
+          if (expr.arguments.length === 0) {
+            return { type: "undefined" };
+          }
+
+          assert(expr.arguments[0].type !== "SpreadElement");
+          const arg = this.evalExpr(expr.arguments[0]);
+          if (arg.type === "string") {
+            return this.directEval(arg.value);
+          } else {
+            return arg;
+          }
+        } else {
+          callThis = { type: "undefined" };
+          assert(expr.callee.type !== "Super");
+          callee = this.evalExpr(expr.callee);
+          if (callee.type === "undefined" || callee.type === "null") {
+            throw new VMError("can't invoke undefined/null");
+          }
+        }
+
+        assert(callee instanceof VMInvokable);
+        return this.performCall(callee, callThis, args);
+      }
+
+      case "ThisExpression": {
+        for (
+          let scope: Scope | null = this.currentScope;
+          scope;
+          scope = scope.parent
+        ) {
+          if (scope.this) {
+            return scope.this;
+          }
+        }
+
+        assert(this.currentScope !== null);
+
+        const isStrict = this.currentScope.isStrict();
+        return isStrict ? { type: "undefined" } : this.globalObj;
+      }
+
+      case "Identifier": {
+        if (expr.name === "undefined") return { type: "undefined" };
+        if (expr.name === "Infinity") {
+          return { type: "number", value: Infinity };
+        }
+        if (expr.name === "NaN") return { type: "number", value: NaN };
+
+        const value = this.lookupVar(expr.name);
+        if (value === undefined) {
+          this.throwError("ReferenceError", "unbound variable: " + expr.name);
+        }
+
+        if (expr.name === "arguments") {
+          console.log('expression Identifier "arguments" resolved to:', value);
+        }
+
+        return value;
+      }
+
+      /** @this VM */
+      case "Literal": {
+        const value = expr.value;
+        const type = typeof value;
+
+        if (this.currentScope.isStrict()) {
+          if (type === "number") {
+            assert(expr.raw !== undefined);
+            if (expr.raw.match(/^0\d+/)) {
+              // octal literals forbidden in strict mode
+              this.throwError(
+                "SyntaxError",
+                "octal literals are forbidden in strict mode",
+              );
+            }
+          }
+        }
+
+        if (expr.value === null) {
+          return { type: "null" };
+        } else if (
+          type === "number" || type === "string" || type === "boolean" ||
+          type === "bigint"
+        ) {
+          assert(typeof value === type);
+          return { type, value };
+        } else if (type === "object" && expr.value instanceof RegExp) {
+          return createRegExpFromNative(expr.value);
+        } else {
+          throw new VMError(
+            `unsupported literal value: ${typeof expr.value} ${
+              Deno.inspect(expr.value)
+            }`,
+          );
+        }
+      }
+    }
+  }
+
+  binExpr(
+    operator: string,
+    left: acorn.Expression,
+    right: acorn.Expression,
+  ): JSValue {
+    console.log(" ----- bin expr", operator);
+    const stringToBigInt = (s: string) => {
+      console.log("stringToBigInt, s =", s);
+
+      try {
+        const ret = BigInt(s);
+        console.log("stringToBigInt, value =", ret);
+        return ret;
+      } catch (e) {
+        console.log("stringToBigInt:", e);
+        if (e instanceof SyntaxError) return undefined;
+        console.log("stringToBigInt: rethrowing");
+        throw e;
+      }
+    };
+    const isLessThan = (a: JSValue, b: JSValue) => {
+      // coercion of objects to primitives must be done by the caller,
+      // where the proper evaluation order is known
+      assert(!(a instanceof VMObject), "isLessThan: a must be primitive");
+      assert(!(b instanceof VMObject), "isLessThan: b must be primitive");
+
+      console.log("isLessThan", { a, b });
+
+      if (a.type === "string" && b.type === "string") {
+        // we could use the host JS's builtins, but we want to get
+        // close to the spec for a future translation
+        const limit = Math.min(a.value.length, b.value.length);
+        for (let i = 0; i < limit; ++i) {
+          const ac = a.value.codePointAt(i);
+          assert(ac !== undefined);
+          const bc = b.value.codePointAt(i);
+          assert(bc !== undefined);
+          if (ac < bc) return true;
+          if (ac > bc) return false;
+        }
+        if (a.value.length < b.value.length) return true;
+        return false;
+      } else if (a.type === "bigint" && b.type === "string") {
+        const bb = stringToBigInt(b.value);
+        if (bb === undefined) return undefined;
+        console.log("isLessThan: bigint/string:", {
+          aa: a.value,
+          bb,
+        });
+        assert(typeof a.value === "bigint");
+        assert(typeof bb === "bigint");
+        return a.value < bb;
+      } else if (a.type === "string" && b.type === "bigint") {
+        const aa = stringToBigInt(a.value);
+        if (aa === undefined) return undefined;
+        console.log("isLessThan: string/bigint:", {
+          aa,
+          bb: b.value,
+        });
+        assert(typeof aa === "bigint");
+        assert(typeof b.value === "bigint");
+        return aa < b.value;
+      } else {
+        console.log(`isLessThan: numeric (${a.type}/${b.type})`);
+        const an = this.coerceNumeric(a);
+        const bn = this.coerceNumeric(b);
+
+        assert(typeof an === "number" || typeof an === "bigint");
+        assert(typeof bn === "number" || typeof bn === "bigint");
+
+        console.log("isLessThan: coerced numeric", { an, bn });
+
+        if (Number.isNaN(an) || Number.isNaN(bn)) return undefined;
+        console.log("bn =", bn);
+        if (an === -Infinity) return (bn !== -Infinity);
+        if (bn === +Infinity) return (an !== +Infinity);
+        return an < bn;
+      }
+    };
+
+    const arithmeticOp = (op: string, a: JSValue, b: JSValue): JSValue => {
+      let a = this.coerceNumeric(a);
+      let b = this.coerceNumeric(b);
+
+      if (a.type === "number" && b.type === "number") {
+        const res = op(a, b);
+        assert(typeof res === "number");
+        return { type: "number", value: res };
+      } else if (a.type === "bigint" && b.type === "bigint") {
+        const res = op(a, b);
+        assert(typeof res === "bigint");
+        return { type: "bigint", value: res };
+      } else {
+        this.throwError(
+          "TypeError",
+          `invalid operands for arithmetic operation: ${a.type}, ${b.type}`,
+        );
+      }
+    };
+
+    const numberOrStringOp = (implNumeric, implString) => {
+      const a = this.evalExpr(left);
+      const b = this.evalExpr(right);
+
+      const ap = this.coerceToPrimitive(a, "valueOf first");
+      const bp = this.coerceToPrimitive(b, "valueOf first");
+
+      if (ap.type === "string" || bp.type === "string") {
+        const as = this.coerceToString(ap);
+        const bs = this.coerceToString(bp);
+        assert(typeof as === "string", "invalid value (as)");
+        assert(typeof bs === "string", "invalid value (bs)");
+
+        const result = implString(as, bs);
+
+        const rt = typeof result;
+        assert(rt === "string" || rt === "boolean");
+        return { type: rt, value: result };
+      }
+
+      let result;
+      if (ap.type === "bigint" && bp.type === "string") {
+        const bb = this.coerceToBigInt(bp);
+        assert(typeof bb === "bigint");
+        assert(typeof ap.value === "bigint");
+        result = implNumeric(ap.value, bb);
+      } else if (ap.type === "bigint" && bp.type === "string") {
+        const ab = this.coerceToBigInt(ap);
+        assert(typeof ab === "bigint");
+        assert(typeof bp.value === "bigint");
+        result = implNumeric(ab, bp.value);
+      } else {
+        const an = this.coerceNumeric(ap);
+        const bn = this.coerceNumeric(bp);
+
+        if (ap.type === bp.type) {
+          assert(typeof an === "number" || typeof an === "bigint");
+          assert(typeof bn === "number" || typeof bn === "bigint");
+        }
+
+        console.log(`>> operation on ${typeof an}:`, { an, bn });
+        result = implNumeric(an, bn);
+      }
+      const rt = typeof result;
+      assert(rt === "number" || rt === "bigint" || rt === "boolean");
+      console.log(".. result = ", { rt, result });
+      return { type: rt, value: result };
+    };
+
+    const isGreaterOrEqual = (a, b) => {
+      const ret = isLessThan(a, b);
+      console.log("isGreaterOrEqual: got from isLessThan:", ret);
+      // if (ret === undefined) ret = undefined;
+      console.log("isGreaterOrEqual =>", ret);
+      if (typeof ret === "boolean") return !ret;
+      assert(typeof ret === "undefined");
+      return undefined;
+    };
+
+    const negateU = (x) => {
+      if (typeof x === "boolean") return !x;
+      return false; // undefined is always false
+    };
+    const wrapV = (x) => {
+      assert(typeof x === "boolean");
+      return { type: "boolean", value };
+    };
+
+    if (operator === "===") {
+      const value = this.tripleEqual(left, right);
+      assert(typeof value === "boolean");
+      return { type: "boolean", value };
+    } else if (operator === "!==") {
+      const ret = this.tripleEqual(left, right);
+      assert(typeof ret === "boolean");
+      return { type: "boolean", value: !ret };
+    } else if (operator === "==") {
+      const ret = this.looseEqual(left, right);
+      assert(
+        typeof ret === "boolean",
+        "looseEqual did not return boolean (==)",
+      );
+      return { type: "boolean", value: ret };
+    } else if (operator === "!=") {
+      const ret = this.looseEqual(left, right);
+      assert(
+        typeof ret === "boolean",
+        "looseEqual did not return boolean (!=)",
+      );
+      return { type: "boolean", value: !ret };
+    } else if (operator === "+") {
+      return numberOrStringOp((a, b) => a + b, (a, b) => a + b);
+    } else if (operator === "-") return arithmeticOp((a, b) => a - b);
+    else if (operator === "*") return arithmeticOp((a, b) => a * b);
+    else if (operator === "/") return arithmeticOp((a, b) => a / b);
+    else if (operator === "<") {
+      const a = this.coerceToPrimitive(this.evalExpr(left));
+      const b = this.coerceToPrimitive(this.evalExpr(right));
+      let ret = isLessThan(a, b);
+      assert(typeof ret === "undefined" || typeof ret === "boolean");
+      return { type: "boolean", value: Boolean(ret) };
+    } else if (operator === "<=") {
+      const a = this.coerceToPrimitive(this.evalExpr(left));
+      const b = this.coerceToPrimitive(this.evalExpr(right));
+      let ret = isLessThan(b, a);
+      console.log("<=: isLessThan returned", ret);
+      if (typeof ret === "boolean") ret = !ret;
+      console.log("<=: negated:", ret);
+      assert(typeof ret === "undefined" || typeof ret === "boolean");
+      console.log("<=: returning:", Boolean(ret));
+      return { type: "boolean", value: Boolean(ret) };
+    } else if (operator === ">") {
+      const a = this.coerceToPrimitive(this.evalExpr(left));
+      const b = this.coerceToPrimitive(this.evalExpr(right));
+      let ret = isLessThan(b, a);
+      assert(typeof ret === "undefined" || typeof ret === "boolean");
+      return { type: "boolean", value: Boolean(ret) };
+    } else if (operator === ">=") {
+      const a = this.coerceToPrimitive(this.evalExpr(left));
+      const b = this.coerceToPrimitive(this.evalExpr(right));
+      let ret = isLessThan(a, b);
+      console.log(">=: isLessThan(a, b) returned", ret);
+      if (typeof ret === "boolean") ret = !ret;
+      console.log(">=: negated", ret);
+      assert(typeof ret === "undefined" || typeof ret === "boolean");
+      console.log(">=: returning", Boolean(ret));
+      return { type: "boolean", value: Boolean(ret) };
+    } else if (operator === "instanceof") {
+      const constructor = this.evalExpr(right);
+      let obj = this.evalExpr(left);
+      for (; obj !== null; obj = obj.proto) {
+        const check = obj.getProperty("constructor");
+        if (!(check instanceof VMObject)) continue;
+        if (check.is(constructor)) {
+          return { type: "boolean", value: true };
+        }
+      }
+
+      return { type: "boolean", value: false };
+    } else throw new VMError("unsupported binary op: " + operator);
   }
 
   makeFunction(paramNodes, body, options = {}) {
@@ -1245,7 +1888,7 @@ export class VM {
     return func;
   }
 
-  isTruthy({ type, value }) {
+  isTruthy({ type, value }: JSValue) {
     if (type === "object") {
       throw new VMError("not yet implemented: isTruthy for object");
     }
@@ -1408,572 +2051,6 @@ export class VM {
     assert(typeof ret === "symbol");
     return ret;
   }
-
-  exprs = {
-    AssignmentExpression(expr) {
-      let value = this.evalExpr(expr.right);
-
-      if (expr.operator === "=") {}
-      else if (expr.operator === "+=") {
-        const updateExpr = { ...expr, type: "BinaryExpression", operator: "+" };
-        value = this.evalExpr(updateExpr);
-      } else {
-        throw new VMError(
-          "unsupported update assignment op. " + Deno.inspect(expr),
-        );
-      }
-
-      return this.doAssignment(expr.left, value);
-    },
-
-    UpdateExpression(expr) {
-      const value = this.evalExpr(expr.argument);
-      if (value.type !== "number") {
-        this.throwTypeError(
-          `update operation only support on numbers, not ${value.type}`,
-        );
-      }
-
-      let newValue;
-      if (expr.operator === "++") {
-        newValue = { type: "number", value: value.value + 1 };
-      } else if (expr.operator === "--") {
-        newValue = { type: "number", value: value.value - 1 };
-      } else {
-        throw new VMError("unsupported update operator: " + expr.operator);
-      }
-
-      return this.doAssignment(expr.argument, newValue);
-    },
-
-    FunctionExpression(expr) {
-      assert(
-        expr.id === null,
-        "unsupported: function expression with non-null id: " + expr.id,
-      );
-      assert(!expr.expression, "unsupported: FunctionExpression.expression");
-      assert(!expr.generator, "unsupported: FunctionExpression.generator");
-      assert(!expr.async, "unsupported: FunctionExpression.async");
-
-      return this.makeFunction(expr.params, expr.body);
-    },
-
-    ObjectExpression(expr) {
-      const obj = new VMObject();
-
-      for (const propertyNode of expr.properties) {
-        assert(propertyNode.type === "Property", "node's type === 'Property'");
-        assert(propertyNode.method === false, "node's method === false");
-        assert(propertyNode.shorthand === false, "node's shorthand === false");
-        assert(propertyNode.computed === false, "node's computed === false");
-
-        assert(propertyNode.key.type === "Identifier");
-        const key = propertyNode.key.name;
-
-        if (propertyNode.kind === "init") {
-          const value = this.evalExpr(propertyNode.value);
-          obj.setProperty(key, value);
-        } else if (propertyNode.kind === "get" || propertyNode.kind === "set") {
-          const func = this.evalExpr(propertyNode.value);
-          if (!(func instanceof VMInvokable)) {
-            throw new VMError(
-              "VM bug: getter/setter was not evaluated as function?",
-            );
-          }
-          obj.defineProperty(key, { [propertyNode.kind]: func });
-        } else {
-          throw new VMError("unsupported property kind: " + propertyNode.kind);
-        }
-      }
-
-      return obj;
-    },
-
-    ArrayExpression(expr) {
-      const elements = expr.elements.map((elmNode) => this.evalExpr(elmNode));
-
-      const arrayCons = this.globalObj.getProperty("Array");
-      const array = this.performNew(arrayCons, []);
-      const pushMethod = array.getProperty("push");
-      for (const elm of elements) {
-        this.performCall(pushMethod, array, [elm]);
-      }
-
-      return array;
-    },
-
-    MemberExpression(expr) {
-      assert(!expr.optional, "unsupported: MemberExpression.optional");
-
-      let object = this.coerceToObject(this.evalExpr(expr.object));
-
-      let key;
-      if (expr.computed) {
-        key = this.evalExpr(expr.property);
-      } else if (expr.property.type === "Identifier") {
-        key = { type: "string", value: expr.property.name };
-      } else {
-        throw new AssertionError(
-          "MemberExpression: !computed, but property not an Identifier",
-        );
-      }
-
-      if (key.type === "string") {
-        return object.getProperty(key.value, this);
-      } else if (key.type === "number") {
-        return object.getIndex(key.value);
-      } else {
-        throw new AssertionError(
-          "MemberExpression: unsupported key type: " + key.type,
-        );
-      }
-    },
-
-    UnaryExpression(expr) {
-      if (expr.operator === "delete") {
-        assert(expr.prefix, "parser bug: delete must be prefix");
-        if (expr.argument.type === "Identifier") {
-          const name = expr.argument.name;
-          const didDelete = this.deleteVar(name);
-          return { type: "boolean", value: didDelete };
-        } else if (expr.argument.type === "MemberExpression") {
-          const obj = this.evalExpr(expr.argument.object);
-          if (!(obj instanceof VMObject)) {
-            this.throwTypeError("can't delete from non-object");
-          }
-
-          let property;
-          if (expr.argument.computed) {
-            const nameValue = this.evalExpr(expr.argument.property);
-            if (nameValue.type !== "string") {
-              this.throwTypeError("property type is not string");
-            }
-            property = nameValue.value;
-          } else {
-            property = expr.argument.property.name;
-          }
-
-          const ret = obj.deleteProperty(property);
-          return { type: "boolean", value: ret };
-        } else {
-          throw new VMError(
-            "unsupported delete argument: " + Deno.inspect(expr),
-          );
-        }
-      } else if (expr.operator === "typeof") {
-        const value = this.evalExpr(expr.argument);
-        return { type: "string", value: value.type };
-      } else if (expr.operator === "!") {
-        assert(expr.prefix === true, "only supported: expr.prefix === true");
-        const value = this.coerceToBoolean(this.evalExpr(expr.argument));
-        assert(typeof value === "boolean");
-        return { type: "boolean", value: !value };
-      } else if (expr.operator === "+") {
-        const value = this.coerceNumeric(this.evalExpr(expr.argument));
-        if (typeof value !== "number" && typeof value !== "bigint") {
-          return { type: "undefined" };
-        }
-        return { type: typeof value, value: value };
-      } else if (expr.operator === "-") {
-        const value = this.coerceNumeric(this.evalExpr(expr.argument));
-        assert(typeof value === "number" || typeof value === "bigint");
-        return { type: typeof value, value: -value };
-      } else if (expr.operator === "void") {
-        // evaluate and discard
-        this.evalExpr(expr.argument);
-        return { type: "undefined" };
-      } else {
-        throw new VMError("unsupported unary op: " + expr.operator);
-      }
-    },
-
-    BinaryExpression(expr) {
-      console.log(" ----- bin expr", expr.operator);
-      const stringToBigInt = (s) => {
-        assert(typeof s === "string");
-        console.log("stringToBigInt, s =", s);
-
-        try {
-          const ret = BigInt(s);
-          console.log("stringToBigInt, value =", ret);
-          return ret;
-        } catch (e) {
-          console.log("stringToBigInt:", e);
-          if (e instanceof SyntaxError) return undefined;
-          console.log("stringToBigInt: rethrowing");
-          throw e;
-        }
-      };
-      const isLessThan = (a, b) => {
-        // coercion of objects to primitives must be done by the caller,
-        // where the proper evaluation order is known
-        assert(!(a instanceof VMObject), "isLessThan: a must be primitive");
-        assert(!(b instanceof VMObject), "isLessThan: b must be primitive");
-
-        console.log("isLessThan", { a, b });
-
-        if (a.type === "string" && b.type === "string") {
-          // we could use the host JS's builtins, but we want to get
-          // close to the spec for a future translation
-          const limit = Math.min(a.value.length, b.value.length);
-          for (let i = 0; i < limit; ++i) {
-            const ac = a.value.codePointAt(i);
-            const bc = b.value.codePointAt(i);
-            if (ac < bc) return true;
-            if (ac > bc) return false;
-          }
-          if (a.value.length < b.value.length) return true;
-          return false;
-        } else if (a.type === "bigint" && b.type === "string") {
-          const bb = stringToBigInt(b.value);
-          if (bb === undefined) return undefined;
-          console.log("isLessThan: bigint/string:", {
-            aa: a.value,
-            bb,
-          });
-          assert(typeof a.value === "bigint");
-          assert(typeof bb === "bigint");
-          return a.value < bb;
-        } else if (a.type === "string" && b.type === "bigint") {
-          const aa = stringToBigInt(a.value);
-          if (aa === undefined) return undefined;
-          console.log("isLessThan: string/bigint:", {
-            aa,
-            bb: b.value,
-          });
-          assert(typeof aa === "bigint");
-          assert(typeof b.value === "bigint");
-          return aa < b.value;
-        } else {
-          console.log(`isLessThan: numeric (${a.type}/${b.type})`);
-          const an = this.coerceNumeric(a);
-          const bn = this.coerceNumeric(b);
-
-          assert(typeof an === "number" || typeof an === "bigint");
-          assert(typeof bn === "number" || typeof bn === "bigint");
-
-          console.log("isLessThan: coerced numeric", { an, bn });
-
-          if (Number.isNaN(an) || Number.isNaN(bn)) return undefined;
-          console.log("bn =", bn);
-          if (an === -Infinity) return (bn !== -Infinity);
-          if (bn === +Infinity) return (an !== +Infinity);
-          return an < bn;
-        }
-
-        throw new VMError("unreachable code");
-      };
-
-      const arithmeticOp = (op) => {
-        const a = this.evalExpr(expr.left);
-        const b = this.evalExpr(expr.right);
-
-        if (a.type === "number" && b.type === "number") {
-          const res = op(a, b);
-          assert(typeof res === "number");
-          return { type: "number", value: res };
-        } else if (a.type === "bigint" && b.type === "bigint") {
-          const res = op(a, b);
-          assert(typeof res === "bigint");
-          return { type: "bigint", value: res };
-        } else {
-          this.throwError(
-            "TypeError",
-            `invalid operands for arithmetic operation: ${a.type}, ${b.type}`,
-          );
-        }
-      };
-
-      const numberOrStringOp = (implNumeric, implString) => {
-        const a = this.evalExpr(expr.left);
-        const b = this.evalExpr(expr.right);
-
-        const ap = this.coerceToPrimitive(a, "valueOf first");
-        const bp = this.coerceToPrimitive(b, "valueOf first");
-
-        if (ap.type === "string" || bp.type === "string") {
-          const as = this.coerceToString(ap);
-          const bs = this.coerceToString(bp);
-          assert(typeof as === "string", "invalid value (as)");
-          assert(typeof bs === "string", "invalid value (bs)");
-
-          const result = implString(as, bs);
-
-          const rt = typeof result;
-          assert(rt === "string" || rt === "boolean");
-          return { type: rt, value: result };
-        }
-
-        let result;
-        if (ap.type === "bigint" && bp.type === "string") {
-          const bb = this.coerceToBigInt(bp);
-          assert(typeof bb === "bigint");
-          assert(typeof ap.value === "bigint");
-          result = implNumeric(ap.value, bb);
-        } else if (ap.type === "bigint" && bp.type === "string") {
-          const ab = this.coerceToBigInt(ap);
-          assert(typeof ab === "bigint");
-          assert(typeof bp.value === "bigint");
-          result = implNumeric(ab, bp.value);
-        } else {
-          const an = this.coerceNumeric(ap);
-          const bn = this.coerceNumeric(bp);
-
-          if (ap.type === bp.type) {
-            assert(typeof an === "number" || typeof an === "bigint");
-            assert(typeof bn === "number" || typeof bn === "bigint");
-          }
-
-          console.log(`>> operation on ${typeof an}:`, { an, bn });
-          result = implNumeric(an, bn);
-        }
-        const rt = typeof result;
-        assert(rt === "number" || rt === "bigint" || rt === "boolean");
-        console.log(".. result = ", { rt, result });
-        return { type: rt, value: result };
-      };
-
-      const isGreaterOrEqual = (a, b) => {
-        const ret = isLessThan(a, b);
-        console.log("isGreaterOrEqual: got from isLessThan:", ret);
-        // if (ret === undefined) ret = undefined;
-        console.log("isGreaterOrEqual =>", ret);
-        if (typeof ret === "boolean") return !ret;
-        assert(typeof ret === "undefined");
-        return undefined;
-      };
-
-      const negateU = (x) => {
-        if (typeof x === "boolean") return !x;
-        return false; // undefined is always false
-      };
-      const wrapV = (x) => {
-        assert(typeof x === "boolean");
-        return { type: "boolean", value };
-      };
-
-      if (expr.operator === "===") {
-        const value = this.tripleEqual(expr.left, expr.right);
-        assert(typeof value === "boolean");
-        return { type: "boolean", value };
-      } else if (expr.operator === "!==") {
-        const ret = this.tripleEqual(expr.left, expr.right);
-        assert(typeof ret === "boolean");
-        return { type: "boolean", value: !ret };
-      } else if (expr.operator === "==") {
-        const ret = this.looseEqual(expr.left, expr.right);
-        assert(
-          typeof ret === "boolean",
-          "looseEqual did not return boolean (==)",
-        );
-        return { type: "boolean", value: ret };
-      } else if (expr.operator === "!=") {
-        const ret = this.looseEqual(expr.left, expr.right);
-        assert(
-          typeof ret === "boolean",
-          "looseEqual did not return boolean (!=)",
-        );
-        return { type: "boolean", value: !ret };
-      } else if (expr.operator === "+") {
-        return numberOrStringOp((a, b) => a + b, (a, b) => a + b);
-      } else if (expr.operator === "-") return arithmeticOp((a, b) => a - b);
-      else if (expr.operator === "*") return arithmeticOp((a, b) => a * b);
-      else if (expr.operator === "/") return arithmeticOp((a, b) => a / b);
-      else if (expr.operator === "<") {
-        const a = this.coerceToPrimitive(this.evalExpr(expr.left));
-        const b = this.coerceToPrimitive(this.evalExpr(expr.right));
-        let ret = isLessThan(a, b);
-        assert(typeof ret === "undefined" || typeof ret === "boolean");
-        return { type: "boolean", value: Boolean(ret) };
-      } else if (expr.operator === "<=") {
-        const a = this.coerceToPrimitive(this.evalExpr(expr.left));
-        const b = this.coerceToPrimitive(this.evalExpr(expr.right));
-        let ret = isLessThan(b, a);
-        console.log("<=: isLessThan returned", ret);
-        if (typeof ret === "boolean") ret = !ret;
-        console.log("<=: negated:", ret);
-        assert(typeof ret === "undefined" || typeof ret === "boolean");
-        console.log("<=: returning:", Boolean(ret));
-        return { type: "boolean", value: Boolean(ret) };
-      } else if (expr.operator === ">") {
-        const a = this.coerceToPrimitive(this.evalExpr(expr.left));
-        const b = this.coerceToPrimitive(this.evalExpr(expr.right));
-        let ret = isLessThan(b, a);
-        assert(typeof ret === "undefined" || typeof ret === "boolean");
-        return { type: "boolean", value: Boolean(ret) };
-      } else if (expr.operator === ">=") {
-        const a = this.coerceToPrimitive(this.evalExpr(expr.left));
-        const b = this.coerceToPrimitive(this.evalExpr(expr.right));
-        let ret = isLessThan(a, b);
-        console.log(">=: isLessThan(a, b) returned", ret);
-        if (typeof ret === "boolean") ret = !ret;
-        console.log(">=: negated", ret);
-        assert(typeof ret === "undefined" || typeof ret === "boolean");
-        console.log(">=: returning", Boolean(ret));
-        return { type: "boolean", value: Boolean(ret) };
-      } else if (expr.operator === "instanceof") {
-        const constructor = this.evalExpr(expr.right);
-        let obj = this.evalExpr(expr.left);
-        for (; obj !== null; obj = obj.proto) {
-          const check = obj.getProperty("constructor");
-          if (!(check instanceof VMObject)) continue;
-          if (check.is(constructor)) {
-            return { type: "boolean", value: true };
-          }
-        }
-
-        return { type: "boolean", value: false };
-      } else throw new VMError("unsupported binary op: " + expr.operator);
-    },
-
-    LogicalExpression(expr) {
-      if (expr.operator === "||") {
-        const left = this.evalExpr(expr.left);
-        if (this.isTruthy(left)) return left;
-        return this.evalExpr(expr.right);
-      } else if (expr.operator === "&&") {
-        const left = this.evalExpr(expr.left);
-        if (!this.isTruthy(left)) return left;
-        return this.evalExpr(expr.right);
-      } else {
-        throw new VMError("unsupported logical op: " + expr.operator);
-      }
-    },
-
-    ConditionalExpression(expr) {
-      const testValue = this.evalExpr(expr.test);
-      const test = this.coerceToBoolean(testValue);
-      assert(test.type === "boolean");
-      // don't even eval the non-taken branch
-      if (test.value === true) return this.evalExpr(expr.consequent);
-      else if (test.value === false) return this.evalExpr(expr.alternate);
-      else throw new VMError("bug in coerceToBoolean; returned non-boolean");
-    },
-
-    NewExpression(expr) {
-      const constructor = this.evalExpr(expr.callee);
-      const args = expr.arguments.map((argNode) => this.evalExpr(argNode));
-      return this.performNew(constructor, args);
-    },
-
-    CallExpression(expr) {
-      const args = expr.arguments.map((argNode) => this.evalExpr(argNode));
-      let callThis;
-      let callee;
-
-      if (
-        expr.callee.type === "MemberExpression" &&
-        expr.callee.property.type === "Identifier"
-      ) {
-        assert(
-          !expr.callee.computed,
-          "only supported: member call with !computed",
-        );
-        assert(
-          !expr.callee.optional,
-          "only supported: member call with !optional",
-        );
-
-        const name = expr.callee.property.name;
-
-        callThis = this.evalExpr(expr.callee.object);
-        callThis = this.coerceToObject(callThis);
-        callee = callThis.getProperty(name);
-        if (callee.type === "undefined") {
-          throw new VMError(
-            `can't find method ${name} in ${Deno.inspect(callThis)}`,
-          );
-        }
-      } else if (
-        expr.callee.type === "Identifier" && expr.callee.name === "eval"
-      ) {
-        // don't lookup "eval" as a variable, perform "direct eval"
-
-        if (expr.arguments.length === 0) {
-          return { type: "undefined" };
-        }
-
-        const arg = this.evalExpr(expr.arguments[0]);
-        if (arg.type === "string") {
-          return this.directEval(arg.value);
-        } else {
-          return arg;
-        }
-      } else {
-        callThis = { type: "undefined" };
-        callee = this.evalExpr(expr.callee);
-        if (callee.type === "undefined" || callee.type === "null") {
-          throw new VMError("can't invoke undefined/null");
-        }
-      }
-
-      return this.performCall(callee, callThis, args);
-    },
-
-    ThisExpression(expr) {
-      for (let scope = this.currentScope; scope; scope = scope.parent) {
-        if (scope.this) {
-          return scope.this;
-        }
-      }
-
-      const isStrict = this.currentScope.isStrict();
-      return isStrict ? { type: "undefined" } : this.globalObj;
-    },
-
-    Identifier(node) {
-      if (node.name === "undefined") return { type: "undefined" };
-      if (node.name === "Infinity") return { type: "number", value: Infinity };
-      if (node.name === "NaN") return { type: "number", value: NaN };
-
-      const value = this.lookupVar(node.name);
-      if (value === undefined) {
-        this.throwError("ReferenceError", "unbound variable: " + node.name);
-      }
-
-      if (node.name === "arguments") {
-        console.log('expression Identifier "arguments" resolved to:', value);
-      }
-
-      return value;
-    },
-
-    /** @this VM */
-    Literal(node) {
-      const value = node.value;
-      const type = typeof value;
-
-      if (this.currentScope.isStrict()) {
-        if (type === "number") {
-          if (node.raw.match(/^0\d+/)) {
-            // octal literals forbidden in strict mode
-            this.throwError(
-              "SyntaxError",
-              "octal literals are forbidden in strict mode",
-            );
-          }
-        }
-      }
-
-      if (node.value === null) {
-        return { type: "null" };
-      } else if (
-        type === "number" || type === "string" || type === "boolean" ||
-        type === "bigint"
-      ) {
-        assert(typeof value === type);
-        return { type, value };
-      } else if (type === "object" && node.value instanceof RegExp) {
-        return createRegExpFromNative(node.value);
-      } else {
-        throw new VMError(
-          `unsupported literal value: ${typeof node.value} ${
-            Deno.inspect(node.value)
-          }`,
-        );
-      }
-    },
-  };
 
   tripleEqual(leftExpr, rightExpr) {
     const left = this.evalExpr(leftExpr);
@@ -2186,7 +2263,7 @@ export class VM {
     }
   }
 
-  coerceToNumber(value) {
+  coerceToNumber(value: JSValue): number {
     /*
         Numbers are returned as-is.
         undefined turns into NaN.
@@ -2224,13 +2301,13 @@ export class VM {
     }
     throw new AssertionError("unreachable code!");
   }
-  coerceNumeric(value) {
+  coerceNumeric(value: JSValue): number | bigint {
     if (value.type === "number" || value.type === "bigint") {
       return value.value;
     }
     return this.coerceToNumber(value);
   }
-  coerceToBigInt(value) {
+  coerceToBigInt(value: JSValue): bigint {
     if (value instanceof VMObject) {
       value = this.coerceToPrimitive(value);
     }
@@ -2301,6 +2378,13 @@ export class VM {
     return str;
   }
 }
+
+type NodeDispatcher<T extends Node> = {
+  [nodeType: string]: (
+    this: VM,
+    _: T & { type: T["type"] },
+  ) => JSValue | undefined;
+};
 
 type NativeFunc = (vm: VM, subject: JSValue, args: JSValue[]) => JSValue;
 
@@ -2782,13 +2866,6 @@ function createGlobalObject() {
   }
 
   return G;
-}
-
-class SourceWrapper {
-  constructor(private text: string) {}
-  getRange(start: number, end: number) {
-    return this.text.slice(start, end);
-  }
 }
 
 // vim:ts=4:sts=0:sw=0:et

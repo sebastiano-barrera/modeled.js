@@ -16,7 +16,8 @@ function assert(value: boolean, msg?: string): asserts value {
 
 // deno-lint-ignore no-explicit-any
 function assertIsValue(t: { type: string; value?: any }): asserts t is JSValue {
-  if (t.type === "string") assert(t.value === "string");
+  if (t.type === "object") assert(t instanceof VMObject);
+  else if (t.type === "string") assert(t.value === "string");
   else if (t.type === "null") assert(t.value === undefined);
   else if (t.type === "undefined") assert(t.value === undefined);
   else if (t.type === "number") assert(t.value === "number");
@@ -102,7 +103,7 @@ class VMObject {
   readonly type: "object" | "function" = "object";
   descriptors: Map<PropName, Descriptor> = new Map();
 
-  primitive?: boolean | string | number | bigint;
+  primitive?: boolean | string | number | bigint | symbol;
   innerRE?: RegExp;
 
   constructor(private _proto: VMObject | null = PROTO_OBJECT) {}
@@ -114,6 +115,7 @@ class VMObject {
       assert(typeof retVal.type === "string");
       return retVal;
     }
+    assert(descriptor.value !== undefined);
     return descriptor.value;
   }
   getOwnPropertyDescriptor(name: PropName): Descriptor | undefined {
@@ -303,9 +305,12 @@ abstract class VMInvokable extends VMObject {
   params?: string[];
   name: string | null = null;
 
-  constructor() {
+  constructor(consPrototype?: VMObject) {
     super(PROTO_FUNCTION);
-    this.setProperty("prototype", new VMObject());
+    if (consPrototype === undefined) {
+      consPrototype = new VMObject();
+    }
+    this.setProperty("prototype", consPrototype);
   }
 
   abstract run(vm: VM, subject: JSValue, args: JSValue[]): JSValue;
@@ -429,7 +434,7 @@ PROTO_FUNCTION.setProperty(
 );
 PROTO_FUNCTION.setProperty(
   "toString",
-  nativeVMFunc((vm, subject, args) => {
+  nativeVMFunc((_vm, subject, _args) => {
     assert(
       subject instanceof VMFunction,
       "Function.prototype.toString can only be called on a Function",
@@ -457,7 +462,7 @@ PROTO_OBJECT.setProperty(
 
 PROTO_ARRAY.setProperty(
   "push",
-  nativeVMFunc((vm, subject, args) => {
+  nativeVMFunc((_vm, subject, args) => {
     assert(subject instanceof VMArray, "`this` must be an array");
 
     if (typeof args[0] !== "undefined") {
@@ -686,7 +691,8 @@ abstract class Scope {
   parent: Scope | null = null;
 
   walkParents<T>(fn: (_: Scope) => T): T | null {
-    let scope: Scope | null = this;
+    let scope: Scope | null;
+    scope = this;
     while (scope !== null) {
       const ret = fn(scope);
       if (typeof ret !== "undefined") {
@@ -704,7 +710,8 @@ abstract class Scope {
   }
 
   getRoot(): Scope {
-    let scope: Scope | null = this;
+    let scope: Scope | null;
+    scope = this;
     while (scope.parent !== null) {
       scope = scope.parent;
     }
@@ -882,10 +889,6 @@ export class VM {
     });
   }
 
-  #unsupportedNode(node: Node): never {
-    throw new VMError("unsupported node: " + Deno.inspect(node));
-  }
-
   #withSyntaxContext<T>(node: Node, inner: () => T): T {
     this.synCtxError = [];
     try {
@@ -1020,17 +1023,6 @@ export class VM {
         Deno.inspect(callee),
     );
     return callee.invoke(this, subject, args);
-  }
-
-  #dispatch<T extends Node>(
-    node: T,
-    table: NodeDispatcher<T>,
-  ): JSValue | undefined {
-    return this.#withSyntaxContext(node, () => {
-      const handler = table[node.type];
-      if (handler) return handler.call(this, node);
-      return this.#unsupportedNode(node);
-    });
   }
 
   runStmt(node: acorn.Node): JSValue {
@@ -1210,6 +1202,10 @@ export class VM {
           for (const name of properties) {
             assert(typeof name === "string");
             const value = iteree.getOwnProperty(name);
+            assert(
+              value !== undefined,
+              "bug: getOwnPropertyNames returned a property that does not exist",
+            );
             this.doAssignment(asmtTarget, value);
             this.runStmt(stmt.body);
           }
@@ -1257,7 +1253,7 @@ export class VM {
           );
         }
 
-        let newValue;
+        let newValue: JSValue;
         if (expr.operator === "++") {
           newValue = { type: "number", value: value.value + 1 };
         } else if (expr.operator === "--") {
@@ -1266,7 +1262,7 @@ export class VM {
           throw new VMError("unsupported update operator: " + expr.operator);
         }
 
-        return this.doAssignment(expr.argument, newValue);
+        return this.doAssignment(expressionToPattern(expr.argument), newValue);
       }
 
       case "FunctionExpression": {
@@ -1421,7 +1417,7 @@ export class VM {
           return { type: "boolean", value: !value };
         } else if (expr.operator === "+") {
           const value = this.coerceNumeric(this.evalExpr(expr.argument));
-          switch (value.type) {
+          switch (typeof value) {
             case "number":
               return { type: "number", value };
             case "bigint":
@@ -1598,14 +1594,21 @@ export class VM {
 
         if (expr.value === null) {
           return { type: "null" };
-        } else if (
-          type === "number" || type === "string" || type === "boolean" ||
-          type === "bigint"
-        ) {
-          assert(typeof value === type);
-          return { type, value };
+        } // the separate if cases help typescript
+        else if (type === "number") {
+          assert(typeof value == "number");
+          return { type: "number", value };
+        } else if (type === "string") {
+          assert(typeof value == "string");
+          return { type: "string", value };
+        } else if (type === "boolean") {
+          assert(typeof value == "boolean");
+          return { type: "boolean", value };
+        } else if (type === "bigint") {
+          assert(typeof value == "bigint");
+          return { type: "bigint", value };
         } else if (type === "object" && expr.value instanceof RegExp) {
-          return createRegExpFromNative(expr.value);
+          return createRegExpFromNative(this, expr.value);
         } else {
           throw new VMError(
             `unsupported literal value: ${typeof expr.value} ${
@@ -1614,6 +1617,9 @@ export class VM {
           );
         }
       }
+
+      default:
+        throw new VMError(`unsupported expression node type: ${expr.type}`);
     }
   }
 
@@ -1673,16 +1679,16 @@ export class VM {
     if (operator === "<") {
       return { type: "boolean", value: this.isLessThan(ap, bp) };
     } else if (operator === "<=") {
-      let ret = tri2bool(triNegate(this.isLessThan(bp, ap)));
+      const ret = tri2bool(triNegate(this.isLessThan(bp, ap)));
       return { type: "boolean", value: ret };
     } else if (operator === ">") {
-      let ret = this.isLessThan(bp, ap);
+      const ret = this.isLessThan(bp, ap);
       return { type: "boolean", value: ret };
     } else if (operator === ">=") {
-      let ret = tri2bool(triNegate(this.isLessThan(ap, bp)));
+      const ret = tri2bool(triNegate(this.isLessThan(ap, bp)));
       return { type: "boolean", value: ret };
-    } 
-    
+    }
+
     throw new VMError("unsupported binary op: " + operator);
   }
 
@@ -1864,57 +1870,56 @@ export class VM {
     return tri2bool(this.compareLessThan(a, b));
   }
 
-  makeFunction(paramNodes, body, options = {}) {
+  makeFunction(paramNodes: Node[], body: Node, options: FnBuildOptions = {}) {
     const params = paramNodes.map((paramNode) => {
       assert(
         paramNode.type === "Identifier",
         "unsupported: func params of type " + paramNode.type,
       );
-      return paramNode.name;
+      return (<acorn.Identifier> paramNode).name;
     });
 
     assert(
       body.type === "BlockStatement",
       "only supported: BlockStatement as function body",
     );
+    assert(this.currentScope !== null);
+
     const func = new VMFunction(params, body);
     if (!options.scopeStrictnessIrrelevant && this.currentScope.isStrict()) {
-      func.setStrict();
+      func.isStrict = true;
     }
 
     if (!func.isStrict && body.type === "BlockStatement") {
-      const stmts = body.body;
+      const stmts = (<acorn.BlockStatement> body).body;
       if (
-        stmts.length > 0)A &&
+        stmts.length > 0 &&
         stmts[0].type === "ExpressionStatement" &&
         stmts[0].directive === "use strict"
       ) {
-        func.setStrict();
+        func.isStrict = true;
       }
     }
 
     return func;
   }
 
-  isTruthy({ type, value }: JSValue) {
-    if (type === "object") {
+  isTruthy(jsv: JSValue) {
+    if (jsv.type === "object") {
       throw new VMError("not yet implemented: isTruthy for object");
     }
 
-    assert(
-      typeof value === type,
-      `bug: ${type} value does not have ${type} value, but ${typeof value}!`,
-    );
-
-    if (type === "boolean") return value;
-    else if (type === "string") return value.length > 0;
-    else if (type === "undefined") return false;
-    else if (type === "number") {
-      if (Number.isNaN(value)) return false;
-      return value !== 0;
+    if (jsv.type === "boolean") return jsv.value;
+    else if (jsv.type === "string") return jsv.value.length > 0;
+    else if (jsv.type === "undefined") return false;
+    else if (jsv.type === "number") {
+      if (Number.isNaN(jsv.value)) return false;
+      return jsv.value !== 0;
     }
 
-    throw new VMError("not yet implemented: isTruthy: " + Deno.inspect(value));
+    throw new VMError(
+      "not yet implemented: isTruthy: " + Deno.inspect(jsv),
+    );
   }
 
   performNew(constructor: VMInvokable, args: JSValue[]) {
@@ -1928,21 +1933,33 @@ export class VM {
       "vm bug: invalid return type from constructor: " + Deno.inspect(obj),
     );
     obj.setProperty("constructor", constructor);
-    obj.proto = this.coerceToObject(constructor.getProperty("prototype"));
+
+    let prototype = constructor.getProperty("prototype");
+    if (prototype === undefined) {
+      prototype = new VMObject();
+    }
+
+    obj.proto = this.coerceToObject(prototype);
     return obj;
   }
 
-  doAssignment(targetExpr, value) {
+  doAssignment(targetExpr: acorn.Pattern, value: JSValue) {
     if (targetExpr.type === "MemberExpression") {
       assert(
         !targetExpr.optional,
         "unsupported: assignment to MemberExpression with .optional = true",
       );
 
-      const obj = this.evalExpr(targetExpr.object);
+      const objx = targetExpr.object;
+      assert(objx.type !== "Super", "`super` not supported");
+      const obj = this.coerceToObject(this.evalExpr(objx));
 
-      let property;
+      let property: JSValue;
       if (targetExpr.computed) {
+        assert(
+          targetExpr.property.type !== "PrivateIdentifier",
+          "assignment to object property: private identifiers not yet supported",
+        );
         property = this.evalExpr(targetExpr.property);
       } else {
         assert(
@@ -1957,18 +1974,13 @@ export class VM {
       if (property.type === "number") {
         obj.setIndex(property.value, value);
       } else {
+        let propertyName: string | symbol;
         if (!(property.type === "string" || property.type === "symbol")) {
-          property = this.coerceToString(property);
+          propertyName = this.coerceToString(property);
         } else {
-          property = property.value;
+          propertyName = property.value;
         }
-
-        assert(
-          typeof property === "string" || typeof property === "symbol",
-          `property key should have been converted to string or symbol (instead it's ${typeof property})`,
-        );
-
-        obj.setProperty(property, value, this);
+        obj.setProperty(propertyName, value, this);
       }
     } else if (targetExpr.type === "Identifier") {
       const name = targetExpr.name;
@@ -2016,6 +2028,7 @@ export class VM {
       null: undefined,
     }[value.type];
     if (cons) {
+      assert(cons instanceof VMInvokable);
       const obj = this.performNew(cons, [value]);
       assert(obj instanceof VMObject);
       return obj;
@@ -2048,50 +2061,45 @@ export class VM {
     return ret;
   }
 
-  coerceToSymbol(value) {
-    assert(value.type === typeof value.value);
-
-    let ret;
-    if (value.type === "symbol") ret = value.value;
-    else if (value.type === "string") ret = Symbol(value.value);
+  coerceToSymbol(value: JSValue): symbol {
+    if (value.type === "symbol") return value.value;
+    else if (value.type === "string") return Symbol(value.value);
     else this.throwTypeError(`can't convert ${value.type} to symbol`);
-
-    assert(typeof ret === "symbol");
-    return ret;
   }
 
-  tripleEqual(leftExpr, rightExpr) {
+  tripleEqual(leftExpr: acorn.Expression, rightExpr: acorn.Expression) {
     const left = this.evalExpr(leftExpr);
     const right = this.evalExpr(rightExpr);
 
-    if (left.type !== right.type) {
-      return false;
+    if (right.type !== left.type) return false;
+
+    if (left instanceof VMObject) return Object.is(left, right);
+
+    if (right.type === "null" && left.type === "null") {
+      return true;
     }
 
-    const t = left.type;
+    if (
+      (right.type === "boolean" && left.type === "boolean") ||
+      (right.type === "string" && left.type === "string") ||
+      (right.type === "number" && left.type === "number") ||
+      (right.type === "bigint" && left.type === "bigint") ||
+      (right.type === "symbol" && left.type === "symbol")
+    ) return left.value === right.value;
 
-    let value;
-    if (left instanceof VMObject) {
-      value = Object.is(left, right);
-    } else if (t === "null") value = right.type === "null";
-    else if (t === "boolean") value = left.value === right.value;
-    else if (t === "string") value = left.value === right.value;
-    else if (t === "number") value = left.value === right.value;
-    else if (t === "bigint") value = left.value === right.value;
-    else if (t === "symbol") value = left.value === right.value;
-    else if (t === "undefined") value = true;
-    else throw new VMError("invalid value type: " + t);
+    if (right.type === "undefined" && left.type === "undefined") {
+      return true;
+    }
 
-    assert(typeof value === "boolean");
-    return value;
+    throw new VMError("invalid value type: " + right.type);
   }
 
-  looseEqual(left, right) {
-    left = this.evalExpr(left);
-    right = this.evalExpr(right);
-    return this._looseEqual(left, right);
+  looseEqual(left: acorn.Expression, right: acorn.Expression) {
+    const lv = this.evalExpr(left);
+    const rv = this.evalExpr(right);
+    return this._looseEqual(lv, rv);
   }
-  _looseEqual(left, right) {
+  _looseEqual(left: JSValue, right: JSValue) {
     console.log(" ---- loose equal");
 
     /*
@@ -2120,17 +2128,8 @@ export class VM {
         left,
         right,
       });
-      assert((left.type === "object") === (left instanceof VMObject));
-      assert(
-        left instanceof VMObject || left.type === "null" ||
-          left.type === typeof left.value,
-      );
-      assert((right.type === "object") === (right instanceof VMObject));
-      assert(
-        right instanceof VMObject || right.type === "null" ||
-          right.type === typeof right.value,
-        `invalid right value: ${right.type} / ${typeof right.value}`,
-      );
+      assertIsValue(left);
+      assertIsValue(right);
 
       if (left.type === right.type) {
         console.log(" >> same type");
@@ -2144,8 +2143,10 @@ export class VM {
           t === "boolean" ||
           t === "bigint" ||
           t === "symbol"
-        ) result = left.value === right.value;
-        else throw new AssertionError("invalid value type: " + left.type);
+        ) {
+          assert(right.type === left.type); // for TS
+          result = left.value === right.value;
+        } else throw new AssertionError("invalid value type: " + left.type);
 
         assert(typeof result === "boolean");
         return result;
@@ -2225,17 +2226,18 @@ export class VM {
     }
   }
 
-  coerceToPrimitive(value, order = "valueOf first"): JSPrimitive {
+  coerceToPrimitive(value: JSValue, order = "valueOf first"): JSPrimitive {
     if (value instanceof VMObject) {
-      const symToPrimitive = this.globalObj.getProperty("Symbol").getProperty(
-        "toPrimitive",
-      );
+      const symCons = this.globalObj.getProperty("Symbol");
+      assert(symCons instanceof VMObject);
+      const symToPrimitive = symCons.getProperty("toPrimitive");
+      assert(symToPrimitive !== undefined);
       assert(symToPrimitive.type === "symbol");
       assert(typeof symToPrimitive.value === "symbol");
 
-      let prim;
+      let prim: JSPrimitive | undefined;
 
-      const tryCall = (methodName, args) => {
+      const tryCall = (methodName: string | symbol, args: JSValue[]) => {
         if (prim !== undefined) return;
 
         const method = value.getProperty(methodName);
@@ -2243,7 +2245,7 @@ export class VM {
           console.log(`invoking object's ${methodName.toString()}`);
           const ret = method.invoke(this, value, args);
           // primitive: can be used
-          if (ret.type !== "object" && ret.type !== "undefined") {
+          if (!(ret instanceof VMObject) && ret.type !== "undefined") {
             prim = ret;
           }
         } else {
@@ -2295,7 +2297,7 @@ export class VM {
 
     if (value.type === "null") return 0;
 
-    assert(typeof value.value === value.type);
+    assertIsValue(value);
     if (value.type === "number") return value.value;
     if (value.type === "undefined") return NaN;
     if (value.type === "boolean") return value.value ? 1 : 0;
@@ -2317,7 +2319,7 @@ export class VM {
     return this.coerceToNumber(value);
   }
 
-  coerceToBigInt(value: JSValue): bigint {
+  coerceToBigInt(value: JSValue): bigint | undefined {
     if (value instanceof VMObject) {
       value = this.coerceToPrimitive(value);
     }
@@ -2343,15 +2345,11 @@ export class VM {
         else throw e;
       }
     } else if (value.type === "bigint") ret = value.value;
-    else {throw new AssertionError(
-        "unreachable! invalid value type: " + value.type,
-      );}
 
-    assert(typeof ret === "bigint" || typeof ret === "undefined");
     return ret;
   }
 
-  coerceToString(value): string {
+  coerceToString(value: JSValue): string {
     if (value instanceof VMObject) {
       // Objects are first converted to a primitive by calling its [Symbol.toPrimitive]() (with "string" as hint), toString(), and valueOf() methods, in that order. The resulting primitive is then converted to a string.
       const prim = this.coerceToPrimitive(value, "toString first");
@@ -2360,19 +2358,12 @@ export class VM {
           "VM bug: object could not be converted to string (at least Object.prototype.toString should have been called)",
         );
       }
-
-      assert(prim.type !== "object");
       return this.coerceToString(prim);
     }
 
     let str;
     if (value.type === "null") str = "null";
     else {
-      assert(
-        value.type === typeof value.value,
-        `VM bug: invalid primitive value: ${value.type} / ${typeof value
-          .value}`,
-      );
       if (value.type === "string") str = value.value;
       else if (value.type === "undefined") str = "undefined";
       else if (value.type === "boolean") str = value.value ? "true" : "false";
@@ -2381,7 +2372,7 @@ export class VM {
       } else if (value.type === "bigint") {
         str = BigInt.prototype.toString.call(value.value);
       } else if (value.type === "symbol") str = value.value;
-      else throw new VMError("invalid value type: " + value.type);
+      else throw "unreachable";
     }
 
     assert(typeof str === "string");
@@ -2410,13 +2401,6 @@ function tri2bool(tri: Tri, def: boolean = false): boolean {
   return tri;
 }
 
-type NodeDispatcher<T extends Node> = {
-  [nodeType: string]: (
-    this: VM,
-    _: T & { type: T["type"] },
-  ) => JSValue | undefined;
-};
-
 type NativeFunc = (vm: VM, subject: JSValue, args: JSValue[]) => JSValue;
 
 function nativeVMFunc(innerImpl: NativeFunc): VMInvokable {
@@ -2424,6 +2408,10 @@ function nativeVMFunc(innerImpl: NativeFunc): VMInvokable {
     // in innerImpl, `this` is the VMInvokable object
     run = innerImpl;
   }();
+}
+
+interface FnBuildOptions {
+  scopeStrictnessIrrelevant?: boolean;
 }
 
 function assertIsVMRegExp(vm: VM, obj: JSValue): asserts obj is VMRegExp {
@@ -2469,13 +2457,17 @@ function createGlobalObject() {
     return subject;
   });
   G.setProperty("Error", consError);
-  consError
-    .getProperty("prototype")
-    .setProperty("name", { type: "string", value: "Error" });
+  const prototype = consError.getProperty("prototype");
+  assert(prototype instanceof VMObject);
+  prototype.setProperty("name", { type: "string", value: "Error" });
 
-  function createSimpleErrorType(name) {
+  function createSimpleErrorType(name: string) {
     const Error = G.getOwnProperty("Error");
+    assert(Error instanceof VMInvokable);
+
     const parentProto = Error.getProperty("prototype");
+    assert(parentProto instanceof VMObject);
+
     const proto = new VMObject(parentProto);
     proto.setProperty("name", { type: "string", value: name });
 
@@ -2485,8 +2477,8 @@ function createGlobalObject() {
         constructor() {
           super(proto);
         }
-        invoke(vm, subject, args) {
-          return Error.invoke(vm, subject, args);
+        run(vm: VM, subject: JSValue, args: JSValue[]): JSValue {
+          return Error.run(vm, subject, args);
         }
       }(),
     );
@@ -2499,13 +2491,15 @@ function createGlobalObject() {
   createSimpleErrorType("NameError");
 
   const consObject = nativeVMFunc((vm, subject, args) => {
-    assert(typeof vm.currentCallWrapper.isNew === "boolean");
-    if (vm.currentCallWrapper.isNew) {
+    const callWrapper = vm.currentCallWrapper;
+    assert(callWrapper instanceof Scope);
+    assert(typeof callWrapper.isNew === "boolean");
+    if (callWrapper.isNew) {
       // when called via new, subject is already a freshly created object. sufficient to be returned from this constructor
       return subject;
     }
 
-    let arg = args[0] || { type: "undefined" };
+    const arg: JSValue = args[0] || { type: "undefined" };
     if (arg.type === "undefined" || arg.type === "null") {
       return new VMObject();
     }
@@ -2515,7 +2509,7 @@ function createGlobalObject() {
   consObject.setProperty("prototype", PROTO_OBJECT);
   consObject.setProperty(
     "defineProperty",
-    nativeVMFunc((vm, subject, args) => {
+    nativeVMFunc((vm: VM, _: JSValue, args: JSValue[]): JSValue => {
       const [obj, name, descriptor] = args;
       if (!(obj instanceof VMObject)) {
         return vm.throwTypeError(
@@ -2527,11 +2521,11 @@ function createGlobalObject() {
           "Object.defineProperty: second argument must be string",
         );
       }
-      if (!(descriptor instanceof VMObject)) {
-        return vm.throwTypeError(
-          "Object.defineProperty: third argument must be object",
-        );
-      }
+
+      assert(
+        descriptor instanceof VMObject,
+        "Object.defineProperty: third argument must be object",
+      );
 
       assert(typeof name.value === "string");
       // descriptorValue is a VM value
@@ -2539,33 +2533,36 @@ function createGlobalObject() {
         return vm.throwError("TypeError", "invalid descriptor: not an object");
       }
 
-      let getter, setter;
+      let getter: VMInvokable | undefined;
+      let setter: VMInvokable | undefined;
       if (
         descriptor.containsOwnProperty("get") ||
         descriptor.containsOwnProperty("set")
       ) {
-        function checkFunc(key) {
-          const value = descriptor.getProperty(key);
-          if (
-            !(value === undefined || value.type === "undefined" ||
-              value instanceof VMInvokable)
-          ) {
+        const checkFunc = (key: "get" | "set"): VMInvokable | undefined => {
+          let value = descriptor.getProperty(key);
+          if (value !== undefined && value.type === "undefined") {
+            value = undefined;
+          }
+
+          if (value !== undefined && !(value instanceof VMInvokable)) {
             return vm.throwError(
               "TypeError",
               `invalid descriptor: '${key}' is not a function`,
             );
           }
           return value;
-        }
+        };
 
         getter = checkFunc("get");
         setter = checkFunc("set");
       }
 
-      function parseBool(key) {
-        const value = descriptor.getProperty("writable");
+      function parseBool(key: PropName): boolean {
+        const value = (<VMObject> descriptor).getProperty(key);
+        assert(value !== undefined);
         if (value.type === "undefined") return true;
-        if (value.type === "boolean") {
+        if (value.type !== "boolean") {
           return vm.throwError(
             "TypeError",
             "invalid descriptor: `writable` is not a boolean",
@@ -2576,6 +2573,7 @@ function createGlobalObject() {
 
       const writable = parseBool("writable");
       const configurable = parseBool("configurable");
+      const enumerable = parseBool("enumerable");
 
       obj.defineProperty(name.value, {
         get: getter,
@@ -2583,18 +2581,22 @@ function createGlobalObject() {
         value: descriptor.getProperty("value"),
         writable,
         configurable,
+        enumerable,
       });
       return { type: "undefined" };
     }),
   );
   consObject.setProperty(
     "getOwnPropertyDescriptor",
-    nativeVMFunc((vm, subject, args) => {
-      /** @type VMObject */
-      const obj = vm.coerceToObject(args[0] || { type: "undefined" });
+    nativeVMFunc((vm, _subject, args) => {
+      const obj: VMObject = vm.coerceToObject(args[0] || { type: "undefined" });
       const name = args[1];
       if (name === undefined || name.type === "undefined") {
         return { type: "undefined" };
+      }
+
+      if (!(name.type === "string" || name.type === "symbol")) {
+        return vm.throwTypeError("Invalid type for an object property");
       }
 
       const descriptor = obj.getOwnPropertyDescriptor(name.value);
@@ -2631,9 +2633,8 @@ function createGlobalObject() {
   );
   consObject.setProperty(
     "getOwnPropertyNames",
-    nativeVMFunc((vm, subject, args) => {
-      /** @type VMObject */
-      const obj = vm.coerceToObject(args[0] || { type: "undefined" });
+    nativeVMFunc((vm, _subject, args) => {
+      const obj: VMObject = vm.coerceToObject(args[0] || { type: "undefined" });
       const names = obj.getOwnPropertyNames();
       const ret = new VMArray();
       for (const name of names) {
@@ -2645,40 +2646,28 @@ function createGlobalObject() {
   );
   G.setProperty("Object", consObject);
 
-  function wrapPrimitive(subject, value, coercer, primType, prototype) {
-    const prim = coercer(value);
-    assert(
-      typeof prim === primType,
-      `coercer returned <${typeof prim}>, expected <${primType}>`,
-    );
-    if (subject instanceof VMObject) {
-      subject = new VMObject(prototype);
-      subject.primitive = prim;
-      return subject;
-    }
-    return { type: primType, value: prim };
-  }
-
   function addPrimitiveWrapperConstructor(
-    name,
-    prototype,
-    primType,
-    coercerName,
+    name: string,
+    prototype: VMObject,
+    primType: PrimType,
+    coercer: (vm: VM, value: JSValue) => VMObject["primitive"],
   ) {
-    const cons = nativeVMFunc((vm, subject, args) => {
-      const arg = args[0] === undefined ? { type: "undefined" } : args[0];
-      const prim = vm[coercerName](arg);
-      assert(
-        typeof prim === primType,
-        `coercer returned <${typeof prim}>, expected <${primType}>`,
-      );
+    const cons = nativeVMFunc((vm, subject, args): JSValue => {
+      assert(subject instanceof VMObject);
+      const arg: JSValue = args[0] === undefined
+        ? { type: "undefined" }
+        : args[0];
 
+      const prim = coercer(vm, arg);
       if (subject instanceof VMObject) {
         subject = new VMObject(prototype);
         subject.primitive = prim;
         return subject;
       }
-      return { type: primType, value: prim };
+
+      const ret = { type: primType, value: prim };
+      assertIsValue(ret);
+      return ret;
     });
 
     G.setProperty(name, cons);
@@ -2686,18 +2675,18 @@ function createGlobalObject() {
     return cons;
   }
 
-  const consBoolean = addPrimitiveWrapperConstructor(
+  addPrimitiveWrapperConstructor(
     "Boolean",
     PROTO_BOOLEAN,
     "boolean",
-    "coerceToBoolean",
+    (vm, x) => vm.coerceToBoolean(x),
   );
 
   const consNumber = addPrimitiveWrapperConstructor(
     "Number",
     PROTO_NUMBER,
     "number",
-    "coerceToNumber",
+    (vm, x) => vm.coerceToNumber(x),
   );
   consNumber.setProperty("POSITIVE_INFINITY", {
     type: "number",
@@ -2737,11 +2726,11 @@ function createGlobalObject() {
     "String",
     PROTO_STRING,
     "string",
-    "coerceToString",
+    (vm, x) => vm.coerceToString(x),
   );
   consString.setProperty(
     "fromCharCode",
-    nativeVMFunc((vm, subject, args) => {
+    nativeVMFunc((vm, _subject, args) => {
       const arg = args[0];
       if (arg === undefined || arg.type === "undefined") {
         return { type: "string", value: "" };
@@ -2763,7 +2752,7 @@ function createGlobalObject() {
     "Symbol",
     PROTO_SYMBOL,
     "symbol",
-    "coerceToSymbol",
+    (vm, x) => vm.coerceToSymbol(x),
   );
   // we import some well-known symbols from the host JS
   // TODO stop doing this; define our own Symbol representation and our own well-defined symbols
@@ -2772,7 +2761,7 @@ function createGlobalObject() {
     value: Symbol.toPrimitive,
   });
 
-  const consArray = nativeVMFunc((vm, subject, args) => {
+  const consArray = nativeVMFunc((_vm, subject) => {
     assert(
       subject.type === "object",
       "Only supported invoking via new Array()",
@@ -2782,7 +2771,7 @@ function createGlobalObject() {
   G.setProperty("Array", consArray);
   consArray.setProperty(
     "isArray",
-    nativeVMFunc((vm, subject, args) => {
+    nativeVMFunc((_vm, subject, _args) => {
       const value = subject instanceof VMArray;
       assert(typeof value === "boolean");
       return { type: "boolean", value };
@@ -2790,7 +2779,7 @@ function createGlobalObject() {
   );
   consArray.setProperty("prototype", PROTO_ARRAY);
 
-  const consFunction = nativeVMFunc((vm, subject, args) => {
+  const consFunction = nativeVMFunc((vm, _subject, args) => {
     // even when invoked as `new Function(...)`, discard this, return another object
 
     if (args.length === 0 || args[0].type !== "string") {
@@ -2803,29 +2792,42 @@ function createGlobalObject() {
     const ast = acorn.parse(text, {
       ecmaVersion: "latest",
       allowReturnOutsideFunction: true,
-      directSourceFile: new SourceWrapper(text),
+      directSourceFile: text,
       locations: true,
     });
     assert(ast.type === "Program");
-    ast.type = "BlockStatement";
-    return vm.makeFunction([], ast, { scopeStrictnessIrrelevant: true });
+    const body: acorn.Statement[] = ast.body.map((item) => {
+      assert(
+        item.type !== "ImportDeclaration" &&
+          item.type !== "ExportNamedDeclaration" &&
+          item.type !== "ExportDefaultDeclaration" &&
+          item.type !== "ExportAllDeclaration",
+      );
+      return item;
+    });
+    const blockStmt: acorn.BlockStatement = {
+      ...ast,
+      body,
+      type: "BlockStatement",
+    };
+    return vm.makeFunction([], blockStmt, { scopeStrictnessIrrelevant: true });
   });
   G.setProperty("Function", consFunction);
   consFunction.setProperty("prototype", PROTO_FUNCTION);
 
-  const consRegExp = nativeVMFunc((vm, subject, args) => {
+  const consRegExp = nativeVMFunc((vm, _subject, args) => {
     const arg = args[0];
     if (arg.type !== "string") {
       return vm.throwTypeError("RegExp constructor argument must be string");
     }
-    return createRegExpFromNative(new RegExp(arg.value));
+    return createRegExpFromNative(vm, new RegExp(arg.value));
   });
   G.setProperty("RegExp", consRegExp);
   consRegExp.setProperty("prototype", PROTO_REGEXP);
 
   G.setProperty(
     "eval",
-    nativeVMFunc((vm, subject, args) => {
+    nativeVMFunc((vm, _subject, args) => {
       // this function is only looked up for indirect eval; direct eval has a
       // dedicated path in the parser
 
@@ -2842,8 +2844,9 @@ function createGlobalObject() {
 
       // the comments are from:
       // https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/eval
-      let savedScope = vm.currentScope;
-      let rootScope = vm.currentScope.getRoot();
+      assert(vm.currentScope !== null);
+      const savedScope = vm.currentScope;
+      const rootScope = vm.currentScope.getRoot();
       try {
         // Indirect eval works in the global scope rather than the local
         // scope, and the code being evaluated doesn't have access to
@@ -2863,7 +2866,7 @@ function createGlobalObject() {
 
   G.setProperty(
     "nativeHello",
-    nativeVMFunc((vm, subject, args) => {
+    nativeVMFunc(() => {
       console.log("hello world!");
       return { type: "undefined" };
     }),
@@ -2871,7 +2874,7 @@ function createGlobalObject() {
 
   G.setProperty(
     "$print",
-    nativeVMFunc((vm, subject, args) => {
+    nativeVMFunc((vm, _subject, args) => {
       for (const arg of args) {
         const prim = vm.coerceToPrimitive(arg);
         console.log(prim);
@@ -2897,6 +2900,16 @@ function createGlobalObject() {
   }
 
   return G;
+}
+
+function expressionToPattern(argument: acorn.Expression): acorn.Pattern {
+  if (
+    argument.type === "Identifier" ||
+    argument.type === "MemberExpression"
+  ) return argument;
+  throw new VMError(
+    "bug: expression can't be used as pattern: " + Deno.inspect(argument),
+  );
 }
 
 // vim:ts=4:sts=0:sw=0:et

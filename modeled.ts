@@ -29,14 +29,17 @@ function assertIsValue(t: { type: string; value?: any }): asserts t is JSValue {
 class VMError extends Error {}
 
 type JSValue =
+  | JSPrimitive
+  | VMObject;
+
+type JSPrimitive =
   | { type: "null" }
   | { type: "undefined" }
   | { type: "number"; value: number }
   | { type: "boolean"; value: boolean }
   | { type: "string"; value: string }
   | { type: "bigint"; value: bigint }
-  | { type: "symbol"; value: symbol }
-  | VMObject;
+  | { type: "symbol"; value: symbol };
 
 type PrimType = JSValue["type"];
 
@@ -1620,182 +1623,15 @@ export class VM {
     right: acorn.Expression,
   ): JSValue {
     console.log(" ----- bin expr", operator);
-    const stringToBigInt = (s: string) => {
-      console.log("stringToBigInt, s =", s);
-
-      try {
-        const ret = BigInt(s);
-        console.log("stringToBigInt, value =", ret);
-        return ret;
-      } catch (e) {
-        console.log("stringToBigInt:", e);
-        if (e instanceof SyntaxError) return undefined;
-        console.log("stringToBigInt: rethrowing");
-        throw e;
-      }
-    };
-    const isLessThan = (a: JSValue, b: JSValue) => {
-      // coercion of objects to primitives must be done by the caller,
-      // where the proper evaluation order is known
-      assert(!(a instanceof VMObject), "isLessThan: a must be primitive");
-      assert(!(b instanceof VMObject), "isLessThan: b must be primitive");
-
-      console.log("isLessThan", { a, b });
-
-      if (a.type === "string" && b.type === "string") {
-        // we could use the host JS's builtins, but we want to get
-        // close to the spec for a future translation
-        const limit = Math.min(a.value.length, b.value.length);
-        for (let i = 0; i < limit; ++i) {
-          const ac = a.value.codePointAt(i);
-          assert(ac !== undefined);
-          const bc = b.value.codePointAt(i);
-          assert(bc !== undefined);
-          if (ac < bc) return true;
-          if (ac > bc) return false;
-        }
-        if (a.value.length < b.value.length) return true;
-        return false;
-      } else if (a.type === "bigint" && b.type === "string") {
-        const bb = stringToBigInt(b.value);
-        if (bb === undefined) return undefined;
-        console.log("isLessThan: bigint/string:", {
-          aa: a.value,
-          bb,
-        });
-        assert(typeof a.value === "bigint");
-        assert(typeof bb === "bigint");
-        return a.value < bb;
-      } else if (a.type === "string" && b.type === "bigint") {
-        const aa = stringToBigInt(a.value);
-        if (aa === undefined) return undefined;
-        console.log("isLessThan: string/bigint:", {
-          aa,
-          bb: b.value,
-        });
-        assert(typeof aa === "bigint");
-        assert(typeof b.value === "bigint");
-        return aa < b.value;
-      } else {
-        console.log(`isLessThan: numeric (${a.type}/${b.type})`);
-        const an = this.coerceNumeric(a);
-        const bn = this.coerceNumeric(b);
-
-        assert(typeof an === "number" || typeof an === "bigint");
-        assert(typeof bn === "number" || typeof bn === "bigint");
-
-        console.log("isLessThan: coerced numeric", { an, bn });
-
-        if (Number.isNaN(an) || Number.isNaN(bn)) return undefined;
-        console.log("bn =", bn);
-        if (an === -Infinity) return (bn !== -Infinity);
-        if (bn === +Infinity) return (an !== +Infinity);
-        return an < bn;
-      }
-    };
-
-    const arithmeticOp = (op: string, a: JSValue, b: JSValue): JSValue => {
-      let a = this.coerceNumeric(a);
-      let b = this.coerceNumeric(b);
-
-      if (a.type === "number" && b.type === "number") {
-        const res = op(a, b);
-        assert(typeof res === "number");
-        return { type: "number", value: res };
-      } else if (a.type === "bigint" && b.type === "bigint") {
-        const res = op(a, b);
-        assert(typeof res === "bigint");
-        return { type: "bigint", value: res };
-      } else {
-        this.throwError(
-          "TypeError",
-          `invalid operands for arithmetic operation: ${a.type}, ${b.type}`,
-        );
-      }
-    };
-
-    const numberOrStringOp = (implNumeric, implString) => {
-      const a = this.evalExpr(left);
-      const b = this.evalExpr(right);
-
-      const ap = this.coerceToPrimitive(a, "valueOf first");
-      const bp = this.coerceToPrimitive(b, "valueOf first");
-
-      if (ap.type === "string" || bp.type === "string") {
-        const as = this.coerceToString(ap);
-        const bs = this.coerceToString(bp);
-        assert(typeof as === "string", "invalid value (as)");
-        assert(typeof bs === "string", "invalid value (bs)");
-
-        const result = implString(as, bs);
-
-        const rt = typeof result;
-        assert(rt === "string" || rt === "boolean");
-        return { type: rt, value: result };
-      }
-
-      let result;
-      if (ap.type === "bigint" && bp.type === "string") {
-        const bb = this.coerceToBigInt(bp);
-        assert(typeof bb === "bigint");
-        assert(typeof ap.value === "bigint");
-        result = implNumeric(ap.value, bb);
-      } else if (ap.type === "bigint" && bp.type === "string") {
-        const ab = this.coerceToBigInt(ap);
-        assert(typeof ab === "bigint");
-        assert(typeof bp.value === "bigint");
-        result = implNumeric(ab, bp.value);
-      } else {
-        const an = this.coerceNumeric(ap);
-        const bn = this.coerceNumeric(bp);
-
-        if (ap.type === bp.type) {
-          assert(typeof an === "number" || typeof an === "bigint");
-          assert(typeof bn === "number" || typeof bn === "bigint");
-        }
-
-        console.log(`>> operation on ${typeof an}:`, { an, bn });
-        result = implNumeric(an, bn);
-      }
-      const rt = typeof result;
-      assert(rt === "number" || rt === "bigint" || rt === "boolean");
-      console.log(".. result = ", { rt, result });
-      return { type: rt, value: result };
-    };
-
-    const isGreaterOrEqual = (a, b) => {
-      const ret = isLessThan(a, b);
-      console.log("isGreaterOrEqual: got from isLessThan:", ret);
-      // if (ret === undefined) ret = undefined;
-      console.log("isGreaterOrEqual =>", ret);
-      if (typeof ret === "boolean") return !ret;
-      assert(typeof ret === "undefined");
-      return undefined;
-    };
-
-    const negateU = (x) => {
-      if (typeof x === "boolean") return !x;
-      return false; // undefined is always false
-    };
-    const wrapV = (x) => {
-      assert(typeof x === "boolean");
-      return { type: "boolean", value };
-    };
 
     if (operator === "===") {
       const value = this.tripleEqual(left, right);
-      assert(typeof value === "boolean");
       return { type: "boolean", value };
     } else if (operator === "!==") {
       const ret = this.tripleEqual(left, right);
-      assert(typeof ret === "boolean");
       return { type: "boolean", value: !ret };
     } else if (operator === "==") {
       const ret = this.looseEqual(left, right);
-      assert(
-        typeof ret === "boolean",
-        "looseEqual did not return boolean (==)",
-      );
       return { type: "boolean", value: ret };
     } else if (operator === "!=") {
       const ret = this.looseEqual(left, right);
@@ -1804,56 +1640,228 @@ export class VM {
         "looseEqual did not return boolean (!=)",
       );
       return { type: "boolean", value: !ret };
-    } else if (operator === "+") {
-      return numberOrStringOp((a, b) => a + b, (a, b) => a + b);
-    } else if (operator === "-") return arithmeticOp((a, b) => a - b);
-    else if (operator === "*") return arithmeticOp((a, b) => a * b);
-    else if (operator === "/") return arithmeticOp((a, b) => a / b);
-    else if (operator === "<") {
-      const a = this.coerceToPrimitive(this.evalExpr(left));
-      const b = this.coerceToPrimitive(this.evalExpr(right));
-      let ret = isLessThan(a, b);
-      assert(typeof ret === "undefined" || typeof ret === "boolean");
-      return { type: "boolean", value: Boolean(ret) };
-    } else if (operator === "<=") {
-      const a = this.coerceToPrimitive(this.evalExpr(left));
-      const b = this.coerceToPrimitive(this.evalExpr(right));
-      let ret = isLessThan(b, a);
-      console.log("<=: isLessThan returned", ret);
-      if (typeof ret === "boolean") ret = !ret;
-      console.log("<=: negated:", ret);
-      assert(typeof ret === "undefined" || typeof ret === "boolean");
-      console.log("<=: returning:", Boolean(ret));
-      return { type: "boolean", value: Boolean(ret) };
-    } else if (operator === ">") {
-      const a = this.coerceToPrimitive(this.evalExpr(left));
-      const b = this.coerceToPrimitive(this.evalExpr(right));
-      let ret = isLessThan(b, a);
-      assert(typeof ret === "undefined" || typeof ret === "boolean");
-      return { type: "boolean", value: Boolean(ret) };
-    } else if (operator === ">=") {
-      const a = this.coerceToPrimitive(this.evalExpr(left));
-      const b = this.coerceToPrimitive(this.evalExpr(right));
-      let ret = isLessThan(a, b);
-      console.log(">=: isLessThan(a, b) returned", ret);
-      if (typeof ret === "boolean") ret = !ret;
-      console.log(">=: negated", ret);
-      assert(typeof ret === "undefined" || typeof ret === "boolean");
-      console.log(">=: returning", Boolean(ret));
-      return { type: "boolean", value: Boolean(ret) };
-    } else if (operator === "instanceof") {
-      const constructor = this.evalExpr(right);
-      let obj = this.evalExpr(left);
-      for (; obj !== null; obj = obj.proto) {
+    }
+
+    const av = this.evalExpr(left);
+    const bv = this.evalExpr(right);
+
+    if (operator === "instanceof") {
+      const constructor = bv;
+      if (!(constructor instanceof VMObject)) {
+        return { type: "boolean", value: false };
+      }
+
+      let obj: VMObject | null = this.coerceToObject(av);
+
+      while (obj !== null) {
         const check = obj.getProperty("constructor");
         if (!(check instanceof VMObject)) continue;
         if (check.is(constructor)) {
           return { type: "boolean", value: true };
         }
+        obj = obj.proto;
+      }
+      return { type: "boolean", value: false };
+    } else if (operator === "+") return this.evalAddition(av, bv);
+    else if (operator === "-") return this.arithmeticOp("-", av, bv);
+    else if (operator === "*") return this.arithmeticOp("*", av, bv);
+    else if (operator === "/") return this.arithmeticOp("/", av, bv);
+
+    const ap = this.coerceToPrimitive(av);
+    const bp = this.coerceToPrimitive(bv);
+
+    if (operator === "<") {
+      return { type: "boolean", value: this.isLessThan(ap, bp) };
+    } else if (operator === "<=") {
+      let ret = tri2bool(triNegate(this.isLessThan(bp, ap)));
+      return { type: "boolean", value: ret };
+    } else if (operator === ">") {
+      let ret = this.isLessThan(bp, ap);
+      return { type: "boolean", value: ret };
+    } else if (operator === ">=") {
+      let ret = tri2bool(triNegate(this.isLessThan(ap, bp)));
+      return { type: "boolean", value: ret };
+    } 
+    
+    throw new VMError("unsupported binary op: " + operator);
+  }
+
+  evalAddition(a: JSValue, b: JSValue): JSValue {
+    const aprim = this.coerceToPrimitive(a);
+    const bprim = this.coerceToPrimitive(b);
+
+    if (aprim.type === "string" || bprim.type === "string") {
+      const astr = this.coerceToString(aprim);
+      const bstr = this.coerceToString(bprim);
+      return { type: "string", value: astr + bstr };
+    }
+
+    return this.arithmeticOp("+", aprim, bprim);
+  }
+
+  arithmeticOp(op: string, av: JSValue, bv: JSValue): JSValue {
+    const a = this.coerceNumeric(av);
+    const b = this.coerceNumeric(bv);
+
+    // this could be shortened by taking advantage of JS's dynamicness, but
+    // this version makes it easier to transition to statically-typed impls
+    if (typeof a === "number" && typeof b === "number") {
+      switch (op) {
+        case "**":
+          return { type: "number", value: a ** b };
+        case "*":
+          return { type: "number", value: a * b };
+        case "+":
+          return { type: "number", value: a + b };
+        case "-":
+          return { type: "number", value: a - b };
+        case "<<":
+          return { type: "number", value: a << b };
+        case ">>":
+          return { type: "number", value: a >> b };
+        case "^":
+          return { type: "number", value: a ^ b };
+        case "&":
+          return { type: "number", value: a & b };
+        case "|":
+          return { type: "number", value: a | b };
+        case "/":
+          return { type: "number", value: b === 0 ? Infinity : (a / b) };
+        case "%":
+          return { type: "number", value: a % b };
+        case ">>>":
+          return { type: "number", value: a >>> b };
+        default:
+          this.throwError(
+            "SyntaxError",
+            "unsupported/invalid arithmetic operator: " + op,
+          );
+      }
+    } else if (typeof a === "bigint" && typeof b === "bigint") {
+      switch (op) {
+        case "**":
+          return { type: "bigint", value: a ** b };
+        case "*":
+          return { type: "bigint", value: a * b };
+        case "+":
+          return { type: "bigint", value: a + b };
+        case "-":
+          return { type: "bigint", value: a - b };
+        case "<<":
+          return { type: "bigint", value: a << b };
+        case ">>":
+          return { type: "bigint", value: a >> b };
+        case "^":
+          return { type: "bigint", value: a ^ b };
+        case "&":
+          return { type: "bigint", value: a & b };
+        case "|":
+          return { type: "bigint", value: a | b };
+        case "/":
+          return b == 0n
+            ? { type: "number", value: Infinity }
+            : { type: "bigint", value: (a / b) };
+        case "%":
+          return { type: "bigint", value: a % b };
+        case ">>>":
+          return { type: "bigint", value: a >> b };
+        default:
+          this.throwError(
+            "SyntaxError",
+            "unsupported/invalid arithmetic operator: " + op,
+          );
+      }
+    } else {
+      this.throwError(
+        "TypeError",
+        `invalid operands for arithmetic operation: ${av.type}, ${bv.type}`,
+      );
+    }
+  }
+
+  compareLessThan(a: JSPrimitive, b: JSPrimitive): Tri {
+    console.log("isLessThan", { a, b });
+
+    if (a.type === "string" && b.type === "string") {
+      // we could use the host JS's builtins, but we want to get
+      // close to the spec for a future translation
+
+      const limit = Math.min(a.value.length, b.value.length);
+
+      for (let i = 0; i < limit; ++i) {
+        const ac = a.value.codePointAt(i);
+        assert(ac !== undefined);
+
+        const bc = b.value.codePointAt(i);
+        assert(bc !== undefined);
+
+        if (ac < bc) return true;
+        if (ac > bc) return false;
       }
 
-      return { type: "boolean", value: false };
-    } else throw new VMError("unsupported binary op: " + operator);
+      if (a.value.length < b.value.length) return true;
+      return false;
+    } else if (a.type === "bigint" && b.type === "string") {
+      const bb = stringToBigInt(b.value);
+      if (bb === undefined) return "neither";
+
+      console.log("isLessThan: bigint/string:", {
+        aa: a.value,
+        bb,
+      });
+
+      assert(typeof a.value === "bigint");
+      assert(typeof bb === "bigint");
+      return a.value < bb;
+    } else if (a.type === "string" && b.type === "bigint") {
+      const aa = stringToBigInt(a.value);
+      if (aa === undefined) return "neither";
+
+      console.log("isLessThan: string/bigint:", {
+        aa,
+        bb: b.value,
+      });
+
+      assert(typeof aa === "bigint");
+      assert(typeof b.value === "bigint");
+      return aa < b.value;
+    } else {
+      console.log(`isLessThan: numeric (${a.type}/${b.type})`);
+      const an = this.coerceNumeric(a);
+      const bn = this.coerceNumeric(b);
+
+      console.log("isLessThan: coerced numeric", { an, bn });
+      console.log("bn =", bn);
+
+      if (typeof an === "number") {
+        if (Number.isNaN(an) || Number.isNaN(bn)) return "neither";
+        if (an === -Infinity) return true;
+        if (an === +Infinity) return false;
+
+        if (typeof bn === "number") {
+          if (bn === -Infinity) return false;
+          if (bn === +Infinity) return true;
+          return an < bn;
+        } else if (typeof bn === "bigint") {
+          // replacing a with floor(a) does not influence the comparison
+          const aFloor = BigInt(Math.floor(an));
+          return aFloor < bn;
+        }
+      } else if (typeof an == "bigint") {
+        if (typeof bn === "number") {
+          // replacing b with ceil(b) does not influence the comparison
+          const bCeil = BigInt(Math.ceil(bn));
+          return (an < bCeil);
+        } else if (typeof bn === "bigint") {
+          return (an < bn);
+        }
+      }
+      throw "unreachable!";
+    }
+  }
+
+  isLessThan(a: JSPrimitive, b: JSPrimitive): boolean {
+    return tri2bool(this.compareLessThan(a, b));
   }
 
   makeFunction(paramNodes, body, options = {}) {
@@ -1877,7 +1885,7 @@ export class VM {
     if (!func.isStrict && body.type === "BlockStatement") {
       const stmts = body.body;
       if (
-        stmts.length > 0 &&
+        stmts.length > 0)A &&
         stmts[0].type === "ExpressionStatement" &&
         stmts[0].directive === "use strict"
       ) {
@@ -2217,7 +2225,7 @@ export class VM {
     }
   }
 
-  coerceToPrimitive(value, order = "valueOf first") {
+  coerceToPrimitive(value, order = "valueOf first"): JSPrimitive {
     if (value instanceof VMObject) {
       const symToPrimitive = this.globalObj.getProperty("Symbol").getProperty(
         "toPrimitive",
@@ -2301,12 +2309,14 @@ export class VM {
     }
     throw new AssertionError("unreachable code!");
   }
+
   coerceNumeric(value: JSValue): number | bigint {
     if (value.type === "number" || value.type === "bigint") {
       return value.value;
     }
     return this.coerceToNumber(value);
   }
+
   coerceToBigInt(value: JSValue): bigint {
     if (value instanceof VMObject) {
       value = this.coerceToPrimitive(value);
@@ -2341,7 +2351,7 @@ export class VM {
     return ret;
   }
 
-  coerceToString(value) {
+  coerceToString(value): string {
     if (value instanceof VMObject) {
       // Objects are first converted to a primitive by calling its [Symbol.toPrimitive]() (with "string" as hint), toString(), and valueOf() methods, in that order. The resulting primitive is then converted to a string.
       const prim = this.coerceToPrimitive(value, "toString first");
@@ -2377,6 +2387,27 @@ export class VM {
     assert(typeof str === "string");
     return str;
   }
+}
+
+function stringToBigInt(s: string): bigint | undefined {
+  try {
+    return BigInt(s);
+  } catch (e) {
+    if (e instanceof SyntaxError) return undefined;
+    throw e;
+  }
+}
+
+type Tri = boolean | "neither";
+
+function triNegate(tri: Tri): Tri {
+  if (tri === "neither") return "neither";
+  return !tri;
+}
+
+function tri2bool(tri: Tri, def: boolean = false): boolean {
+  if (tri === "neither") return def;
+  return tri;
 }
 
 type NodeDispatcher<T extends Node> = {

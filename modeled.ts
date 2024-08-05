@@ -323,7 +323,6 @@ abstract class VMInvokable extends VMObject {
 		if (!isNew) {
 			// do this substitution
 			if (!this.isStrict) {
-				console.log("this-substitution: not new, non strict");
 				if (subject.type === "undefined" || subject.type === "null") {
 					subject = vm.globalObj;
 				}
@@ -1589,10 +1588,6 @@ export class VM {
 					this.throwError("ReferenceError", "unbound variable: " + expr.name);
 				}
 
-				if (expr.name === "arguments") {
-					console.log('expression Identifier "arguments" resolved to:', value);
-				}
-
 				return value;
 			}
 
@@ -1649,8 +1644,6 @@ export class VM {
 		left: acorn.Expression,
 		right: acorn.Expression,
 	): JSValue {
-		console.log(" ----- bin expr", operator);
-
 		if (operator === "===") {
 			const value = this.tripleEqual(left, right);
 			return { type: "boolean", value };
@@ -1806,8 +1799,6 @@ export class VM {
 	}
 
 	compareLessThan(a: JSPrimitive, b: JSPrimitive): Tri {
-		console.log("isLessThan", { a, b });
-
 		if (a.type === "string" && b.type === "string") {
 			// we could use the host JS's builtins, but we want to get
 			// close to the spec for a future translation
@@ -1831,11 +1822,6 @@ export class VM {
 			const bb = stringToBigInt(b.value);
 			if (bb === undefined) return "neither";
 
-			console.log("isLessThan: bigint/string:", {
-				aa: a.value,
-				bb,
-			});
-
 			assert(typeof a.value === "bigint");
 			assert(typeof bb === "bigint");
 			return a.value < bb;
@@ -1843,21 +1829,13 @@ export class VM {
 			const aa = stringToBigInt(a.value);
 			if (aa === undefined) return "neither";
 
-			console.log("isLessThan: string/bigint:", {
-				aa,
-				bb: b.value,
-			});
 
 			assert(typeof aa === "bigint");
 			assert(typeof b.value === "bigint");
 			return aa < b.value;
 		} else {
-			console.log(`isLessThan: numeric (${a.type}/${b.type})`);
 			const an = this.coerceNumeric(a);
 			const bn = this.coerceNumeric(b);
-
-			console.log("isLessThan: coerced numeric", { an, bn });
-			console.log("bn =", bn);
 
 			if (typeof an === "number") {
 				if (Number.isNaN(an) || Number.isNaN(bn)) return "neither";
@@ -2033,7 +2011,6 @@ export class VM {
 
 		// weird stupid case. why is BigInt not a constructor?
 		if (value.type === "bigint") {
-			console.log("wrapping bigint in BigInt object");
 			const obj = new VMObject(PROTO_BIGINT);
 			assert(typeof value.value === "bigint");
 			obj.primitive = value.value;
@@ -2121,39 +2098,30 @@ export class VM {
 		return this._looseEqual(lv, rv);
 	}
 	_looseEqual(left: JSValue, right: JSValue) {
-		console.log(" ---- loose equal");
-
 		/*
-				If the operands have the same type, they are compared as follows:
-						Object: return true only if both operands reference the same object.
-						String: return true only if both operands have the same characters in the same order.
-						Number: return true only if both operands have the same value. +0 and -0 are treated as the same value. If either operand is NaN, return false; so, NaN is never equal to NaN.
-						Boolean: return true only if operands are both true or both false.
-						BigInt: return true only if both operands have the same value.
-						Symbol: return true only if both operands reference the same symbol.
-				If one of the operands is null or undefined, the other must also be null or undefined to return true. Otherwise return false.
-				If one of the operands is an object and the other is a primitive, convert the object to a primitive.
-				At this step, both operands are converted to primitives (one of String, Number, Boolean, Symbol, and BigInt). The rest of the conversion is done case-by-case.
-						If they are of the same type, compare them using step 1.
-						If one of the operands is a Symbol but the other is not, return false.
-						If one of the operands is a Boolean but the other is not, convert the boolean to a number: true is converted to 1, and false is converted to 0. Then compare the two operands loosely again.
-						Number to String: convert the string to a number. Conversion failure results in NaN, which will guarantee the equality to be false.
-						Number to BigInt: compare by their numeric value. If the number is ±Infinity or NaN, return false.
-						String to BigInt: convert the string to a BigInt using the same algorithm as the BigInt() constructor. If conversion fails, return false.
-				*/
+		If the operands have the same type, they are compared as follows:
+				Object: return true only if both operands reference the same object.
+				String: return true only if both operands have the same characters in the same order.
+				Number: return true only if both operands have the same value. +0 and -0 are treated as the same value. If either operand is NaN, return false; so, NaN is never equal to NaN.
+				Boolean: return true only if operands are both true or both false.
+				BigInt: return true only if both operands have the same value.
+				Symbol: return true only if both operands reference the same symbol.
+		If one of the operands is null or undefined, the other must also be null or undefined to return true. Otherwise return false.
+		If one of the operands is an object and the other is a primitive, convert the object to a primitive.
+		At this step, both operands are converted to primitives (one of String, Number, Boolean, Symbol, and BigInt). The rest of the conversion is done case-by-case.
+				If they are of the same type, compare them using step 1.
+				If one of the operands is a Symbol but the other is not, return false.
+				If one of the operands is a Boolean but the other is not, convert the boolean to a number: true is converted to 1, and false is converted to 0. Then compare the two operands loosely again.
+				Number to String: convert the string to a number. Conversion failure results in NaN, which will guarantee the equality to be false.
+				Number to BigInt: compare by their numeric value. If the number is ±Infinity or NaN, return false.
+				String to BigInt: convert the string to a BigInt using the same algorithm as the BigInt() constructor. If conversion fails, return false.
+		*/
 
-		let counter = 0;
 		while (true) {
-			console.log("loop:", {
-				counter: ++counter,
-				left,
-				right,
-			});
 			assertIsValue(left);
 			assertIsValue(right);
 
 			if (left.type === right.type) {
-				console.log(" >> same type");
 				const t = left.type;
 				let result;
 				if (t === "object") result = Object.is(left, right);
@@ -2181,12 +2149,10 @@ export class VM {
 
 			if (left instanceof VMObject && !(right instanceof VMObject)) {
 				left = this.coerceToPrimitive(left);
-				console.log(" >> coerced left to primitive;", left);
 				continue;
 			}
 			if (!(left instanceof VMObject) && right instanceof VMObject) {
 				right = this.coerceToPrimitive(right);
-				console.log(" >> coerced right to primitive;", right);
 				continue;
 			}
 
@@ -2263,14 +2229,13 @@ export class VM {
 
 				const method = value.getProperty(methodName);
 				if (method instanceof VMInvokable) {
-					console.log(`invoking object's ${methodName.toString()}`);
 					const ret = method.invoke(this, value, args);
 					// primitive: can be used
 					if (!(ret instanceof VMObject) && ret.type !== "undefined") {
 						prim = ret;
 					}
 				} else {
-					console.log(`object has no method named ${methodName.toString()}`);
+					// object has no method named ${methodName.toString()}
 				}
 			};
 

@@ -31,14 +31,18 @@ if (args.single) {
   const outcome = await runTest262Case(test262Root, args.single);
   console.log(outcome);
 
-} else {
+  } else {
   const successes = []
   const skips = []
   const failures = []
 
-  for (let path of testConfig.testCases) {
-    path = path.startsWith('/') ? path : (test262Root + '/' + path);
+  for (let relPath of testConfig.testCases) {
+    const path = relPath.startsWith('/') ? relPath : (test262Root + '/' + relPath);
     try {
+      if (args.filter && !path.includes(args.filter))  {
+        throw new SkippedTest("skipped via --filter option");
+      }
+  
       const outcomes = await runTest262Case(test262Root, path);
 
       for (const oc of outcomes) { 
@@ -59,7 +63,7 @@ if (args.single) {
   for (const oc of successes) {
     console.log(`%c - ${oc.testcase}`, 'color: green')
   }
-  
+
   console.log(`${skips.length} skipped:`)
   for (const {path, message} of skips) {
     console.log(`%c - ${path}: ${message}`, 'color: yellow')
@@ -67,7 +71,7 @@ if (args.single) {
 
   if (failures.length === 0) {
     console.log('%c     NO FAILURES, IT ALL AL WORKS LFGGGGGG ', 'color: cyan')
-    
+  
   } else {
     console.log('')
     console.log(`${failures.length} failures:`)
@@ -87,6 +91,7 @@ if (args.single) {
     'color: green', 'color: yellow', 'color: red'
   )
 }
+
 
 
 async function runTest262Case(test262Root, path) {
@@ -155,14 +160,11 @@ function parseArgsChecked(args) {
   if (typeof args.test262 !== 'string') {
     throw new CliError('required argument missing or invalid: --test262 DIR, where DIR is the root of the test262 repo');
   } 
-
-  if (args.single !== undefined) {
-    if (typeof(args.single) !== 'string') {
-      throw new CliError('argument for --single must be relative or absolute path to test case, not ' + typeof(args.single));
-    }
-    if (!args.single.startsWith('/')) {
-      args.single = args.test262 + '/' + args.single;
-    }
+  if (args.single !== undefined && typeof(args.single) !== 'string') {
+    throw new CliError('argument for --single must be string');
+  }
+  if (args.filter !== undefined && typeof(args.filter) !== 'string') {
+    throw new CliError('argument for --filter must be string');
   } 
 
   return args;
@@ -182,4 +184,3 @@ function cutMetadata(text) {
     
     return metadataYamlLines.join('\n');
 }
-

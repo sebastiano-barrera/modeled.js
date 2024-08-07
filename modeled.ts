@@ -49,7 +49,9 @@ interface Node extends acorn.Node {
 }
 
 class ProgramException extends Error {
-	constructor(public exceptionValue: JSValue, public context: acorn.Node[]) {
+	context: acorn.Node[];
+
+	constructor(public exceptionValue: JSValue, context: acorn.Node[]) {
 		let message: string | undefined;
 		if (exceptionValue.type === "string") {
 			message = exceptionValue.value;
@@ -68,6 +70,10 @@ class ProgramException extends Error {
 				(message ? `: ${message}` : ""),
 		);
 		this.exceptionValue = exceptionValue;
+
+		// copy the context.  it's too easy to accidentally assign the mutable context
+		// array to this object, which makes it pointless to print later on
+		this.context = [...context];
 	}
 }
 
@@ -1071,7 +1077,7 @@ export class VM {
 
 			case "ThrowStatement": {
 				const exceptionValue = this.evalExpr(stmt.argument);
-				throw new ProgramException(exceptionValue, [...this.synCtx]);
+				throw new ProgramException(exceptionValue, this.synCtx);
 			}
 
 			case "FunctionDeclaration":

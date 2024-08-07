@@ -97,7 +97,7 @@ if (args.single) {
 async function runTest262Case(test262Root, path) {
   console.log(" ... running " + path);
   const text = await Deno.readTextFile(path);
-  const metadata = YAML.parse(cutMetadata(text));
+  const metadata = YAML.parse(cutMetadata(text)) || {};
 
   let runStrict = true;
   let runSloppy = true;

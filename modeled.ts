@@ -1082,24 +1082,10 @@ export class VM {
 			}
 
 			case "FunctionDeclaration":
-				if (stmt.id.type === "Identifier") {
-					const name = stmt.id.name;
-					assert(!stmt.expression, "unsupported func decl type: expression");
-					assert(!stmt.generator, "unsupported func decl type: generator");
-					assert(!stmt.async, "unsupported func decl type: async");
-
-					const func = this.makeFunction(stmt.params, stmt.body);
-					assert(typeof name === "string");
-					func.setProperty("name", { type: "string", value: name });
-					this.defineVar("var", name, func);
-
-					return func;
-				} else {
-					throw new VMError(
-						"unsupported identifier for function declaration: " +
-							Deno.inspect(stmt.id),
-					);
-				}
+				assert(!stmt.expression, "unsupported func decl type: expression");
+				assert(!stmt.generator, "unsupported func decl type: generator");
+				assert(!stmt.async, "unsupported func decl type: async");
+				return this.declareFunction(stmt);
 
 			case "ExpressionStatement":
 				// expression value becomes completion value
@@ -1149,6 +1135,14 @@ export class VM {
 
 				return completion;
 			}
+
+			case "BreakStatement":
+				assert(stmt.label === null, "break + label not yet implemented");
+				throw { break: true };
+
+			case "ContinueStatement":
+				assert(stmt.label === null, "break + label not yet implemented");
+				throw { continue: true };
 
 			case "ReturnStatement": {
 				if (stmt.argument === undefined || stmt.argument === null) {
@@ -1214,6 +1208,23 @@ export class VM {
 					return { type: "undefined" };
 				});
 			}
+
+			case "WhileStatement": {
+				let completion: JSValue = { type: "undefined" };
+				try {
+					while (this.coerceToBoolean(this.evalExpr(stmt.test))) {
+						try {
+							completion = this.runStmt(stmt.body);
+						} catch (e) {
+							if (!e.continue) throw e;
+						}
+					}
+				} catch (e) {
+					if (!e.break) throw e;
+				}
+				return completion;
+			}
+
 			default:
 				throw new VMError("not a (supported) statement: " + stmt.type);
 		}
@@ -1270,15 +1281,10 @@ export class VM {
 			}
 
 			case "FunctionExpression": {
-				assert(
-					expr.id === null,
-					"unsupported: function expression with non-null id: " + expr.id,
-				);
 				assert(!expr.expression, "unsupported: FunctionExpression.expression");
 				assert(!expr.generator, "unsupported: FunctionExpression.generator");
 				assert(!expr.async, "unsupported: FunctionExpression.async");
-
-				return this.makeFunction(expr.params, expr.body);
+				return this.declareFunction(expr);
 			}
 
 			case "ObjectExpression": {
@@ -2029,7 +2035,7 @@ export class VM {
 		} else if (value.type === "bigint") ret = value.value !== 0n;
 		else if (value.type === "string") ret = value.value !== "";
 		else if (value.type === "symbol") ret = true;
-		else if (value.type === "object") ret = !(value instanceof VMObject);
+		else if (value instanceof VMObject) ret = true;
 		else {
 			this.throwTypeError(
 				"can't convert value to boolean: " + Deno.inspect(value),
@@ -2346,6 +2352,30 @@ export class VM {
 
 		assert(typeof str === "string");
 		return str;
+	}
+
+	declareFunction(decl: {
+		id?: acorn.Identifier | null;
+		params: Node[];
+		body: Node;
+	}) {
+		const func = this.makeFunction(decl.params, decl.body);
+
+		if (decl.id === null || typeof decl.id === "undefined") {
+			/* nothing to do */
+		} else if (decl.id.type === "Identifier") {
+			const name = decl.id.name;
+			assert(typeof name === "string");
+			func.setProperty("name", { type: "string", value: name });
+			this.defineVar("var", name, func);
+		} else {
+			throw new VMError(
+				"unsupported identifier for function declaration: " +
+					Deno.inspect(decl.id),
+			);
+		}
+
+		return func;
 	}
 }
 

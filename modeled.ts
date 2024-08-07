@@ -143,17 +143,10 @@ class VMObject {
 		assert(typeof name === "string" || typeof name === "symbol");
 		assert(typeof value.type === "string");
 
-		let descriptor;
-		for (let obj: VMObject | null = <VMObject> this; obj; obj = obj.proto) {
-			descriptor = obj.descriptors.get(name);
-			if (descriptor !== undefined) {
-				break;
-			}
-		}
+		const descriptor = this.descriptors.get(name);
 
 		// TODO Honor writable, configurable, etc.
 		if (descriptor === undefined) {
-			assert(!this.descriptors.has(name));
 			this.descriptors.set(name, {
 				value,
 				configurable: true,

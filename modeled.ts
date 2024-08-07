@@ -669,7 +669,7 @@ PROTO_REGEXP.setProperty(
 
 abstract class Scope {
 	isNew = false;
-	this: JSValue = { type: "undefined" };
+	this: JSValue | null = null;
 	isCallWrapper = false;
 	isSetStrict = false;
 
@@ -701,6 +701,24 @@ abstract class Scope {
 			scope = scope.parent;
 		}
 		return scope;
+	}
+
+	getThis(): JSValue | null {
+		let scope: Scope | null;
+		for (scope = this; scope !== null; scope = scope.parent) {
+			if (scope.this !== null) {
+				return scope.this;
+			}
+		}
+		return null;
+	}
+	getThisValue(globalObj: JSValue): JSValue {
+		const vmThis = this.getThis();
+		return vmThis !== null
+			? vmThis
+			: this.isStrict()
+			? { type: "undefined" }
+			: globalObj;
 	}
 
 	abstract defineVar(kind: DeclKind, name: string, value: JSValue): void;
@@ -1549,17 +1567,7 @@ export class VM {
 
 			case "ThisExpression": {
 				assert(this.currentScope !== null);
-
-				let scope: Scope | null = this.currentScope;
-				while (scope !== null) {
-					if (scope.this) {
-						return scope.this;
-					}
-					scope = scope.parent;
-				}
-
-				const isStrict = this.currentScope.isStrict();
-				return isStrict ? { type: "undefined" } : this.globalObj;
+				return this.currentScope.getThisValue(this.globalObj);
 			}
 
 			case "Identifier": {

@@ -1302,13 +1302,24 @@ export class VM {
 						propertyNode.shorthand === false,
 						"node's shorthand === false",
 					);
-					assert(propertyNode.computed === false, "node's computed === false");
 
-					assert(
-						propertyNode.key.type === "Identifier",
-						"only supported: identifier as property name",
-					);
-					const key = propertyNode.key.name;
+					let key: PropName;
+					if (propertyNode.computed === true) {
+						const keyVal = this.evalExpr(propertyNode.key);
+						if (keyVal.type !== "string" && keyVal.type !== "symbol") {
+							this.throwError(
+								"TypeError",
+								"only string and symbol are allowed as object keys",
+							);
+						}
+						key = keyVal.value;
+					} else {
+						assert(
+							propertyNode.key.type === "Identifier",
+							"only supported: identifier as property name",
+						);
+						key = propertyNode.key.name;
+					}
 
 					if (propertyNode.kind === "init") {
 						const value = this.evalExpr(propertyNode.value);

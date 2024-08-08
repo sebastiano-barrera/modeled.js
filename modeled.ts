@@ -1463,6 +1463,12 @@ export class VM {
 						return { type: "number", value: -value };
 					}
 					return { type: "bigint", value: -value };
+				} else if (expr.operator === "~") {
+					const value = this.coerceToNumeric(this.evalExpr(expr.argument));
+					if (typeof value === "number") {
+						return { type: "number", value: ~value };
+					}
+					return { type: "bigint", value: ~value };
 				} else if (expr.operator === "void") {
 					// evaluate and discard
 					this.evalExpr(expr.argument);

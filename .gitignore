@@ -1,2 +1,6 @@
 .vscode/launch.json
 .vscode/settings.json
+
+isolate-*.log
+prof.*
+

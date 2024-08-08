@@ -2066,7 +2066,7 @@ export class VM {
 			return obj;
 		}
 
-		this.throwTypeError(
+		return this.throwTypeError(
 			"can't convert value to object: " + Deno.inspect(value),
 		);
 	}
@@ -2329,10 +2329,11 @@ export class VM {
 	}
 
 	coerceToNumeric(value: JSValue): number | bigint {
-		if (value.type === "number" || value.type === "bigint") {
-			return value.value;
+		const prim = this.coerceToPrimitive(value);
+		if (prim.type === "number" || prim.type === "bigint") {
+			return prim.value;
 		}
-		return this.coerceToNumber(value);
+		return this.coerceToNumber(prim);
 	}
 
 	coerceToBigInt(value: JSValue): bigint | undefined {

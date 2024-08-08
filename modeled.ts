@@ -24,15 +24,18 @@ function assert(
 // deno-fmt-ignore
 // deno-lint-ignore no-explicit-any
 function assertIsValue(t: { type: string; value?: any }): asserts t is JSValue {
-	if (t.type === "object")         assert(t instanceof VMObject, 'invalid JSValue');
-	else if (t.type === "string")    assert(t.value === "string",  'invalid JSValue');
-	else if (t.type === "null")      assert(t.value === undefined, 'invalid JSValue');
-	else if (t.type === "undefined") assert(t.value === undefined, 'invalid JSValue');
-	else if (t.type === "number")    assert(t.value === "number",  'invalid JSValue');
-	else if (t.type === "boolean")   assert(t.value === "boolean", 'invalid JSValue');
-	else if (t.type === "bigint")    assert(t.value === "bigint",  'invalid JSValue');
-	else if (t.type === "symbol")    assert(t.value === "symbol",  'invalid JSValue');
+	let cond: boolean;
+	if (t.type === "object")         cond = (t instanceof VMObject);
+	else if (t.type === "string")    cond = (typeof t.value === "string");
+	else if (t.type === "null")      cond = (t.value === undefined);
+	else if (t.type === "undefined") cond = (t.value === undefined);
+	else if (t.type === "number")    cond = (typeof t.value === "number");
+	else if (t.type === "boolean")   cond = (typeof t.value === "boolean");
+	else if (t.type === "bigint")    cond = (typeof t.value === "bigint");
+	else if (t.type === "symbol")    cond = (typeof t.value === "symbol");
 	else throw new AssertionError("invalid JSValue");
+
+	assert(cond, () => `invalid JSValue (${t.type}): ${Deno.inspect(t)}`);
 }
 
 class VMError extends Error {}
@@ -267,7 +270,12 @@ abstract class VMInvokable extends VMObject {
 		this.setProperty("prototype", consPrototype);
 	}
 
-	abstract run(vm: VM, subject: JSValue, args: JSValue[]): JSValue;
+	abstract run(
+		vm: VM,
+		subject: JSValue,
+		args: JSValue[],
+		invokeOpts: InvokeOpts,
+	): JSValue;
 
 	invoke(vm: VM, subject: JSValue, args: JSValue[], options: InvokeOpts = {}) {
 		// true iff this invocation comes from new Constructor(...)
@@ -314,7 +322,7 @@ abstract class VMInvokable extends VMObject {
 			vm.defineVar("var", "arguments", argumentsArray);
 
 			// another scope, to allow redefinitions
-			return vm.withScope(() => this.run(vm, subject, args));
+			return vm.withScope(() => this.run(vm, subject, args, options));
 		});
 	}
 }
@@ -1440,7 +1448,7 @@ export class VM {
 					const value = this.coerceToBoolean(this.evalExpr(expr.argument));
 					return { type: "boolean", value: !value };
 				} else if (expr.operator === "+") {
-					const value = this.coerceNumeric(this.evalExpr(expr.argument));
+					const value = this.coerceToNumeric(this.evalExpr(expr.argument));
 					switch (typeof value) {
 						case "number":
 							return { type: "number", value };
@@ -1450,7 +1458,7 @@ export class VM {
 							return { type: "undefined" };
 					}
 				} else if (expr.operator === "-") {
-					const value = this.coerceNumeric(this.evalExpr(expr.argument));
+					const value = this.coerceToNumeric(this.evalExpr(expr.argument));
 					if (typeof value === "number") {
 						return { type: "number", value: -value };
 					}
@@ -1600,7 +1608,6 @@ export class VM {
 				return value;
 			}
 
-			/** @this VM */
 			case "Literal": {
 				const value = expr.value;
 				const type = typeof value;
@@ -1650,24 +1657,25 @@ export class VM {
 		left: acorn.Expression,
 		right: acorn.Expression,
 	): JSValue {
-		const av = this.evalExpr(left);
-		const bv = this.evalExpr(right);
-
+		// expressions are passed directly to handler functions, so that these functions
+		// can determine the evaluation order, and interleave evalExpr and type
+		// coercions
 		if (operator === "===") {
-			return { type: "boolean", value: this.tripleEqual(av, bv) };
+			return { type: "boolean", value: this.tripleEqual(left, right) };
 		} else if (operator === "!==") {
-			return { type: "boolean", value: !this.tripleEqual(av, bv) };
+			return { type: "boolean", value: !this.tripleEqual(left, right) };
 		} else if (operator === "==") {
-			return { type: "boolean", value: this.looseEqual(av, bv) };
+			return { type: "boolean", value: this.looseEqual(left, right) };
 		} else if (operator === "!=") {
-			return { type: "boolean", value: !this.looseEqual(av, bv) };
+			return { type: "boolean", value: !this.looseEqual(left, right) };
 		} else if (operator === "instanceof") {
-			const constructor = bv;
+			const av = this.evalExpr(left);
+			let obj: VMObject | null = this.coerceToObject(av);
+
+			const constructor = this.evalExpr(right);
 			if (!(constructor instanceof VMObject)) {
 				return { type: "boolean", value: false };
 			}
-
-			let obj: VMObject | null = this.coerceToObject(av);
 
 			while (obj !== null) {
 				const check = obj.getProperty("constructor");
@@ -1677,23 +1685,24 @@ export class VM {
 				obj = obj.proto;
 			}
 			return { type: "boolean", value: false };
-		} else if (operator === "+") return this.evalAddition(av, bv);
-		else if (operator === "-") return this.arithmeticOp("-", av, bv);
-		else if (operator === "*") return this.arithmeticOp("*", av, bv);
-		else if (operator === "/") return this.arithmeticOp("/", av, bv);
-		else if (operator === "**") return this.arithmeticOp("**", av, bv);
-		else if (operator === "<<") return this.arithmeticOp("<<", av, bv);
-		else if (operator === ">>") return this.arithmeticOp(">>", av, bv);
-		else if (operator === "^") return this.arithmeticOp("^", av, bv);
-		else if (operator === "&") return this.arithmeticOp("&", av, bv);
-		else if (operator === "|") return this.arithmeticOp("|", av, bv);
-		else if (operator === "%") return this.arithmeticOp("%", av, bv);
-		else if (operator === ">>>") return this.arithmeticOp(">>>", av, bv);
+		} else if (operator === "-") return this.arithmeticOp("-", left, right);
+		else if (operator === "*") return this.arithmeticOp("*", left, right);
+		else if (operator === "/") return this.arithmeticOp("/", left, right);
+		else if (operator === "**") return this.arithmeticOp("**", left, right);
+		else if (operator === "<<") return this.arithmeticOp("<<", left, right);
+		else if (operator === ">>") return this.arithmeticOp(">>", left, right);
+		else if (operator === "^") return this.arithmeticOp("^", left, right);
+		else if (operator === "&") return this.arithmeticOp("&", left, right);
+		else if (operator === "|") return this.arithmeticOp("|", left, right);
+		else if (operator === "%") return this.arithmeticOp("%", left, right);
+		else if (operator === ">>>") return this.arithmeticOp(">>>", left, right);
 
-		const ap = this.coerceToPrimitive(av);
-		const bp = this.coerceToPrimitive(bv);
+		const ap = this.coerceToPrimitive(this.evalExpr(left));
+		const bp = this.coerceToPrimitive(this.evalExpr(right));
 
-		if (operator === "<") {
+		if (operator === "+") {
+			return this.evalAddition(ap, bp);
+		} else if (operator === "<") {
 			return { type: "boolean", value: this.isLessThan(ap, bp) };
 		} else if (operator === "<=") {
 			const ret = tri2bool(triNegate(this.isLessThan(bp, ap)));
@@ -1709,22 +1718,35 @@ export class VM {
 		throw new VMError("unsupported binary op: " + operator);
 	}
 
-	evalAddition(a: JSValue, b: JSValue): JSValue {
-		const aprim = this.coerceToPrimitive(a);
-		const bprim = this.coerceToPrimitive(b);
-
-		if (aprim.type === "string" || bprim.type === "string") {
-			const astr = this.coerceToString(aprim);
-			const bstr = this.coerceToString(bprim);
+	evalAddition(a: JSPrimitive, b: JSPrimitive): JSValue {
+		if (a.type === "string" || b.type === "string") {
+			const astr = this.coerceToString(a);
+			const bstr = this.coerceToString(b);
 			return { type: "string", value: astr + bstr };
+		} else if (a.type === "number" && b.type === "number") {
+			return { type: "number", value: a.value + b.value };
+		} else if (a.type === "bigint" && b.type === "bigint") {
+			return { type: "bigint", value: a.value + b.value };
+		} else {
+			return this.throwError(
+				"SyntaxError",
+				`unsupported types (${a.type}, ${b.type}) for operator +`,
+			);
 		}
-
-		return this.arithmeticOp("+", aprim, bprim);
 	}
 
-	arithmeticOp(op: string, av: JSValue, bv: JSValue): JSValue {
-		const a = this.coerceNumeric(av);
-		const b = this.coerceNumeric(bv);
+	arithmeticOp(
+		op: string,
+		left: acorn.Expression,
+		right: acorn.Expression,
+	): JSValue {
+		// coercion and evalExpr are interleaved!
+		// if coercion of left throws an error, right is never even evaluated
+		const av = this.evalExpr(left);
+		const bv = this.evalExpr(right);
+
+		const a = this.coerceToNumeric(av);
+		const b = this.coerceToNumeric(bv);
 
 		// this could be shortened by taking advantage of JS's dynamicness, but
 		// this version makes it easier to transition to statically-typed impls
@@ -1797,7 +1819,7 @@ export class VM {
 		} else {
 			this.throwError(
 				"TypeError",
-				`invalid operands for arithmetic operation: ${av.type}, ${bv.type}`,
+				"can't mix number and bigint in arithmetic operations",
 			);
 		}
 	}
@@ -1831,8 +1853,8 @@ export class VM {
 			if (aa === undefined) return "neither";
 			return aa < b.value;
 		} else {
-			const an = this.coerceNumeric(a);
-			const bn = this.coerceNumeric(b);
+			const an = this.coerceToNumeric(a);
+			const bn = this.coerceToNumeric(b);
 
 			if (typeof an === "number") {
 				if (Number.isNaN(an) || Number.isNaN(bn)) return "neither";
@@ -2064,7 +2086,10 @@ export class VM {
 		else this.throwTypeError(`can't convert ${value.type} to symbol`);
 	}
 
-	tripleEqual(left: JSValue, right: JSValue) {
+	tripleEqual(leftExpr: acorn.Expression, rightExpr: acorn.Expression) {
+		const left = this.evalExpr(leftExpr);
+		const right = this.evalExpr(rightExpr);
+
 		if (right.type !== left.type) return false;
 
 		if (left instanceof VMObject) return Object.is(left, right);
@@ -2088,7 +2113,10 @@ export class VM {
 		throw new VMError("invalid value type: " + right.type);
 	}
 
-	looseEqual(left: JSValue, right: JSValue) {
+	looseEqual(leftExpr: acorn.Expression, rightExpr: acorn.Expression) {
+		let left = this.evalExpr(leftExpr);
+		let right = this.evalExpr(rightExpr);
+
 		/*
 		If the operands have the same type, they are compared as follows:
 				Object: return true only if both operands reference the same object.
@@ -2280,7 +2308,7 @@ export class VM {
 		if (value.type === "string") return +value.value;
 		if (value.type === "bigint") return Number(value.value);
 		if (value.type === "symbol") {
-			this.throwTypeError("can't convert symbol to number");
+			return this.throwTypeError("can't convert symbol to number");
 		}
 		if (value instanceof VMObject) {
 			return this.coerceToNumber(this.coerceToPrimitive(value));
@@ -2288,7 +2316,7 @@ export class VM {
 		throw new AssertionError("unreachable code!");
 	}
 
-	coerceNumeric(value: JSValue): number | bigint {
+	coerceToNumeric(value: JSValue): number | bigint {
 		if (value.type === "number" || value.type === "bigint") {
 			return value.value;
 		}
@@ -2400,7 +2428,13 @@ function tri2bool(tri: Tri, def: boolean = false): boolean {
 	return tri;
 }
 
-type NativeFunc = (vm: VM, subject: JSValue, args: JSValue[]) => JSValue;
+type NativeFunc = (
+	this: VMInvokable,
+	vm: VM,
+	subject: JSValue,
+	args: JSValue[],
+	options: InvokeOpts,
+) => JSValue;
 
 function nativeVMFunc(innerImpl: NativeFunc): VMInvokable {
 	return new class extends VMInvokable {
@@ -2477,8 +2511,13 @@ function createGlobalObject() {
 				constructor() {
 					super(proto);
 				}
-				run(vm: VM, subject: JSValue, args: JSValue[]): JSValue {
-					return Error.run(vm, subject, args);
+				override run(
+					vm: VM,
+					subject: JSValue,
+					args: JSValue[],
+					options: InvokeOpts,
+				): JSValue {
+					return Error.run(vm, subject, args, options);
 				}
 			}(),
 		);
@@ -2654,14 +2693,13 @@ function createGlobalObject() {
 		primType: PrimType,
 		coercer: (vm: VM, value: JSValue) => VMObject["primitive"],
 	) {
-		const cons = nativeVMFunc((vm, subject, args): JSValue => {
-			assert(subject instanceof VMObject, "this must be object");
+		const cons = nativeVMFunc((vm, subject, args, options): JSValue => {
 			const arg: JSValue = args[0] === undefined
 				? { type: "undefined" }
 				: args[0];
 
 			const prim = coercer(vm, arg);
-			if (subject instanceof VMObject) {
+			if (options.isNew) {
 				subject = new VMObject(prototype);
 				subject.primitive = prim;
 				return subject;

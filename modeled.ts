@@ -1649,28 +1649,18 @@ export class VM {
 		left: acorn.Expression,
 		right: acorn.Expression,
 	): JSValue {
-		if (operator === "===") {
-			const value = this.tripleEqual(left, right);
-			return { type: "boolean", value };
-		} else if (operator === "!==") {
-			const ret = this.tripleEqual(left, right);
-			return { type: "boolean", value: !ret };
-		} else if (operator === "==") {
-			const ret = this.looseEqual(left, right);
-			return { type: "boolean", value: ret };
-		} else if (operator === "!=") {
-			const ret = this.looseEqual(left, right);
-			assert(
-				typeof ret === "boolean",
-				"looseEqual did not return boolean (!=)",
-			);
-			return { type: "boolean", value: !ret };
-		}
-
 		const av = this.evalExpr(left);
 		const bv = this.evalExpr(right);
 
-		if (operator === "instanceof") {
+		if (operator === "===") {
+			return { type: "boolean", value: this.tripleEqual(av, bv) };
+		} else if (operator === "!==") {
+			return { type: "boolean", value: !this.tripleEqual(av, bv) };
+		} else if (operator === "==") {
+			return { type: "boolean", value: this.looseEqual(av, bv) };
+		} else if (operator === "!=") {
+			return { type: "boolean", value: !this.looseEqual(av, bv) };
+		} else if (operator === "instanceof") {
 			const constructor = bv;
 			if (!(constructor instanceof VMObject)) {
 				return { type: "boolean", value: false };
@@ -1690,6 +1680,14 @@ export class VM {
 		else if (operator === "-") return this.arithmeticOp("-", av, bv);
 		else if (operator === "*") return this.arithmeticOp("*", av, bv);
 		else if (operator === "/") return this.arithmeticOp("/", av, bv);
+		else if (operator === "**") return this.arithmeticOp("**", av, bv);
+		else if (operator === "<<") return this.arithmeticOp("<<", av, bv);
+		else if (operator === ">>") return this.arithmeticOp(">>", av, bv);
+		else if (operator === "^") return this.arithmeticOp("^", av, bv);
+		else if (operator === "&") return this.arithmeticOp("&", av, bv);
+		else if (operator === "|") return this.arithmeticOp("|", av, bv);
+		else if (operator === "%") return this.arithmeticOp("%", av, bv);
+		else if (operator === ">>>") return this.arithmeticOp(">>>", av, bv);
 
 		const ap = this.coerceToPrimitive(av);
 		const bp = this.coerceToPrimitive(bv);
@@ -2070,10 +2068,7 @@ export class VM {
 		else this.throwTypeError(`can't convert ${value.type} to symbol`);
 	}
 
-	tripleEqual(leftExpr: acorn.Expression, rightExpr: acorn.Expression) {
-		const left = this.evalExpr(leftExpr);
-		const right = this.evalExpr(rightExpr);
-
+	tripleEqual(left: JSValue, right: JSValue) {
 		if (right.type !== left.type) return false;
 
 		if (left instanceof VMObject) return Object.is(left, right);
@@ -2097,12 +2092,7 @@ export class VM {
 		throw new VMError("invalid value type: " + right.type);
 	}
 
-	looseEqual(left: acorn.Expression, right: acorn.Expression) {
-		const lv = this.evalExpr(left);
-		const rv = this.evalExpr(right);
-		return this._looseEqual(lv, rv);
-	}
-	_looseEqual(left: JSValue, right: JSValue) {
+	looseEqual(left: JSValue, right: JSValue) {
 		/*
 		If the operands have the same type, they are compared as follows:
 				Object: return true only if both operands reference the same object.

@@ -1494,6 +1494,12 @@ export class VM {
 					const left = this.evalExpr(expr.left);
 					if (!this.isTruthy(left)) return left;
 					return this.evalExpr(expr.right);
+				} else if (expr.operator === "??") {
+					const left = this.evalExpr(expr.left);
+					if (left.type === "null" || left.type === "undefined") {
+						return this.evalExpr(expr.right);
+					}
+					return left;
 				} else {
 					throw new VMError("unsupported logical op: " + expr.operator);
 				}

@@ -8,8 +8,15 @@ import * as acorn from "npm:acorn";
 //  - impl 2: bytecode interpreter, with coarse instructions
 
 class AssertionError extends Error {}
-function assert(value: boolean, msg?: string): asserts value {
+function assert(
+	value: boolean,
+	msg?: string | (() => string),
+): asserts value {
 	if (!value) {
+		// note that if msg is a function, we only call it when we know the assertion is failed.
+		if (typeof msg === "function") {
+			msg = msg();
+		}
 		throw new AssertionError("assertion failed: " + msg);
 	}
 }
@@ -183,8 +190,10 @@ class VMObject {
 				const val = descriptor[key];
 				assert(
 					val === undefined || val instanceof VMInvokable,
-					`invalid descriptor: '${key}' is not a JS function nor undefined: ` +
-						Deno.inspect(val),
+					() =>
+						`invalid descriptor: '${key}' is not a JS function nor undefined: ${
+							Deno.inspect(val)
+						}`,
 				);
 			}
 		}
@@ -1034,7 +1043,8 @@ export class VM {
 	performCall(callee: VMInvokable, subject: JSValue, args: JSValue[]) {
 		assert(
 			callee instanceof VMInvokable,
-			"you can only call a function (native or virtual), not " +
+			() =>
+				"you can only call a function (native or virtual), not " +
 				Deno.inspect(callee),
 		);
 		return callee.invoke(this, subject, args);
@@ -1922,7 +1932,8 @@ export class VM {
 
 		assert(
 			obj instanceof VMObject,
-			"vm bug: invalid return type from constructor: " + Deno.inspect(obj),
+			() =>
+				"vm bug: invalid return type from constructor: " + Deno.inspect(obj),
 		);
 		obj.setProperty("constructor", constructor);
 

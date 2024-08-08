@@ -2925,10 +2925,9 @@ function createGlobalObject() {
 
 	G.setProperty(
 		"$print",
-		nativeVMFunc((vm, _subject, args) => {
+		nativeVMFunc((_vm, _subject, args) => {
 			for (const arg of args) {
-				const prim = vm.coerceToPrimitive(arg);
-				console.log(prim);
+				console.log(arg);
 			}
 			return { type: "undefined" };
 		}),

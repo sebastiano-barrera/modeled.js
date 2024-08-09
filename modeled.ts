@@ -2947,6 +2947,15 @@ function createGlobalObject() {
 		}),
 	);
 
+	G.setProperty(
+		"isNaN",
+		nativeVMFunc((vm, _, args) => {
+			const arg = args[0] || { type: "undefined" };
+			const numArg = vm.coerceToNumber(arg);
+			return { type: "boolean", value: Number.isNaN(numArg) };
+		}),
+	);
+
 	for (const name of G.getOwnPropertyNames()) {
 		const value = G.getOwnProperty(name);
 

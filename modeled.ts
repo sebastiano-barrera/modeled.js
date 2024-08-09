@@ -1671,6 +1671,16 @@ export class VM {
 				}
 			}
 
+			case "SequenceExpression":
+				assert(
+					expr.expressions.length >= 1,
+					"parser bug: SequenceExpression must have at least one sub-expression",
+				);
+				for (let i = 0; i < expr.expressions.length - 1; i++) {
+					this.evalExpr(expr.expressions[i]);
+				}
+				return this.evalExpr(expr.expressions[expr.expressions.length - 1]);
+
 			default:
 				throw new VMError(`unsupported expression node type: ${expr.type}`);
 		}

@@ -1,14 +1,17 @@
 import fullTestConfig from './fullTestConfig.json' with {type: 'json'};
+import testMeta from './testMeta.json' with {type: 'json'};
 
-const predicate = path => path.startsWith('test/language/statements/');
-
-const prob = 0.4
+const fraction = 1.0
+const predicate = path => (
+  path.startsWith('test/language/') 
+  && (testMeta.testCases[path] || {}).features === undefined 
+  && Math.random() < fraction
+);
 
 const filteredTestCases = []
-console.log(fullTestConfig)
 for (const tc of fullTestConfig.testCases) {
-  if (predicate(tc) && Math.random() < prob) {
-    filteredTestCases.push(tc)
+  if (predicate(tc)) {
+    filteredTestCases.push(tc);
   }
 }
 

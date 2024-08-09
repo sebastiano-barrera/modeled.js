@@ -176,7 +176,10 @@ class VMObject {
 		this.descriptors.set(name, descriptor);
 	}
 	deleteProperty(name: PropName): boolean {
-		return this.descriptors.delete(name);
+		const descriptor = this.descriptors.get(name);
+		if (descriptor === undefined || !descriptor.configurable) return false;
+		this.descriptors.delete(name);
+		return true;
 	}
 
 	getIndex(index: number) {
@@ -792,7 +795,12 @@ class EnvScope extends Scope {
 			kind === "var" || kind === "let" || kind === "const",
 			"`kind` must be one of 'var', 'let', or 'const'",
 		);
-		this.env.setProperty(name, value);
+		this.env.defineProperty(name, {
+			value,
+			configurable: false,
+			enumerable: true,
+			writable: true,
+		});
 	}
 	setVar(name: string, value: JSValue, vm?: VM): void {
 		assert(
@@ -817,7 +825,9 @@ class EnvScope extends Scope {
 	}
 
 	deleteVar(name: string): boolean {
-		if (this.dontDelete.has(name)) return false;
+		if (this.dontDelete.has(name)) {
+			return false;
+		}
 		return this.env.deleteProperty(name);
 	}
 

@@ -951,7 +951,7 @@ export class VM {
 						? excval.getProperty("message")
 						: excval;
 					return {
-						outcome: "error",
+						outcome: "failure",
 						message,
 						error,
 					};

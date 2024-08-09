@@ -167,8 +167,11 @@ class VMObject {
 		if (descriptor.set) {
 			assert(vm instanceof VM, "looking up described value but vm not passed");
 			return vm.performCall(descriptor.set, this, [value]);
-		} else {
+		} else if (descriptor.get === undefined) {
 			descriptor.value = value;
+		} else {
+			// we have a getter but not a setter
+			vm?.throwError("TypeError", "descriptor has getter but no setter");
 		}
 	}
 	defineProperty(name: PropName, descriptor: Descriptor) {
@@ -2683,8 +2686,9 @@ function createGlobalObject() {
 
 			function parseBool(key: PropName): boolean {
 				const value = (<VMObject> descriptor).getProperty(key);
-				assert(value !== undefined, "descriptor property must exist");
-				if (value.type === "undefined") return true;
+				if (value === undefined || value.type === "undefined") {
+					return true;
+				}
 				if (value.type !== "boolean") {
 					return vm.throwError(
 						"TypeError",

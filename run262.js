@@ -42,6 +42,13 @@ if (args.single) {
           console.log(`\tectx\t${item.loc.source}:${item.loc.start.line}-${item.loc.end.line}:${item.loc.start.column}-${item.loc.start.column} ${item.type}`)
         }
       }
+
+      const stack = outcome.error.stack;
+      if (stack) {
+        for (const line of stack.split('\n')) {
+          console.log(`\tstack\t${line}`);
+        }
+      }
     }
   } 
 

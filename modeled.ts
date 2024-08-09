@@ -1239,6 +1239,7 @@ export class VM {
 				let binOp = "";
 
 				if (expr.operator === "=") binOp = "";
+				else if (expr.operator === "+=") binOp = "+";
 				else if (expr.operator === "*=") binOp = "*";
 				else if (expr.operator === "-=") binOp = "-";
 				else if (expr.operator === "%=") binOp = "%";

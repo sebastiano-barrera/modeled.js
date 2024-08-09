@@ -30,8 +30,20 @@ const preamble = {
 
 if (args.single) {
   console.log(" --- single test case " + args.single);
-  const outcome = await runTest262Case(test262Root, args.single);
-  console.log(outcome);
+  const outcomes = await runTest262Case(test262Root, args.single);
+  for (const outcome of outcomes) {
+    console.log(`outcome\t${outcome.outcome}`)
+    if (outcome.outcome === 'failure') {
+      console.log(`\terror\t${outcome.error}`)
+
+      const context = outcome.error.context;
+      if (context) {
+        for (const item of context) {
+          console.log(`\tectx\t${item.loc.source}:${item.loc.start.line}-${item.loc.end.line}:${item.loc.start.column}-${item.loc.start.column} ${item.type}`)
+        }
+      }
+    }
+  } 
 
 } else {
   const successes = []

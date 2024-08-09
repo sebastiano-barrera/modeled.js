@@ -316,10 +316,11 @@ abstract class VMInvokable extends VMObject {
 				}
 			}
 
-			const argumentsArray = new VMArray();
-			argumentsArray.arrayElements.push(...args);
-
-			vm.defineVar("var", "arguments", argumentsArray);
+			vm.defineVar("var", "arguments", () => {
+				const argumentsArray = new VMArray();
+				argumentsArray.arrayElements.push(...args);
+				return argumentsArray;
+			});
 
 			// another scope, to allow redefinitions
 			return vm.withScope(() => this.run(vm, subject, args, options));
@@ -695,7 +696,11 @@ abstract class Scope {
 			: globalObj;
 	}
 
-	abstract defineVar(kind: DeclKind, name: string, value: JSValue): void;
+	abstract defineVar(
+		kind: DeclKind,
+		name: string,
+		valueOrThunk: JSValue | (() => JSValue),
+	): void;
 	abstract setVar(name: string, value: JSValue, vm?: VM): void;
 	abstract lookupVar(name: string): JSValue | undefined;
 	abstract deleteVar(name: string): boolean;
@@ -712,7 +717,7 @@ function assertValidDeclKind(kind: string): asserts kind is DeclKind {
 }
 
 class VarScope extends Scope {
-	vars = new Map<string, JSValue>();
+	vars = new Map<string, JSValue | (() => JSValue)>();
 	dontDelete = new Set<string>();
 
 	// true iff this scope is the function's wrapper
@@ -722,22 +727,24 @@ class VarScope extends Scope {
 	// this allows us to allow var to redefine an argument in the function
 	isCallWrapper = false;
 
-	defineVar(kind: DeclKind, name: string, value: JSValue) {
+	defineVar(
+		kind: DeclKind,
+		name: string,
+		valueOrThunk: JSValue | (() => JSValue),
+	) {
 		assertValidDeclKind(kind);
 
 		// var decls bubble up to the top of the function's body
 		if (kind === "var" && !this.isCallWrapper && this.parent !== null) {
-			return this.parent.defineVar(kind, name, value);
+			return this.parent.defineVar(kind, name, valueOrThunk);
 		}
-
-		assert(typeof name === "string", "var name must be string");
 
 		if (this.vars.has(name)) {
 			// redefinition, discard
 			return;
 		}
 
-		this.vars.set(name, value);
+		this.vars.set(name, valueOrThunk);
 	}
 
 	setVar(name: string, value: JSValue, vm: VM) {
@@ -753,7 +760,10 @@ class VarScope extends Scope {
 	}
 
 	lookupVar(name: string): JSValue | undefined {
-		const value = this.vars.get(name);
+		let value = this.vars.get(name);
+		if (typeof value === "function") {
+			value = value();
+		}
 		if (typeof value !== "undefined") return value;
 		if (this.parent) return this.parent.lookupVar(name);
 		return undefined;
@@ -827,9 +837,13 @@ export class VM {
 	// VM state (variables, stack, heap, ...)
 	//
 
-	defineVar(kind: DeclKind, name: string, value: JSValue) {
+	defineVar(
+		kind: DeclKind,
+		name: string,
+		valueOrThunk: JSValue | (() => JSValue),
+	) {
 		assert(this.currentScope !== null, "there must be a scope");
-		return this.currentScope.defineVar(kind, name, value);
+		return this.currentScope.defineVar(kind, name, valueOrThunk);
 	}
 	setVar(name: string, value: JSValue, _vm?: VM) {
 		assert(this.currentScope !== null, "there must be a scope");
@@ -931,32 +945,6 @@ export class VM {
 				this.currentScope = null;
 				return { outcome: "success" };
 			} catch (error) {
-				if (error.context) {
-					const context: acorn.Node[] = error.context;
-					console.error("with syntax context:");
-					for (const node of context) {
-						assert(
-							node.loc !== null && node.loc !== undefined,
-							"nodes don't have loc",
-						);
-						assert(
-							typeof node.loc.source === "string",
-							"nodes' loc don't have the source",
-						);
-						const sourceText = textOfSource.get(node.loc.source);
-
-						console.error(
-							`|  ${node.loc.source}:${node.loc.start.line}-${node.loc.end.line}: ${node.type}`,
-						);
-						if (sourceText !== undefined && node.end - node.start <= 100) {
-							const excerpt = sourceText.slice(node.start, node.end);
-							for (const line of excerpt.split("\n")) {
-								console.error("  > " + line);
-							}
-						}
-					}
-				}
-
 				if (error instanceof ProgramException) {
 					const excval = error.exceptionValue;
 					const message = excval.type === "object"
@@ -1014,9 +1002,7 @@ export class VM {
 	performCall(callee: VMInvokable, subject: JSValue, args: JSValue[]) {
 		assert(
 			callee instanceof VMInvokable,
-			() =>
-				"you can only call a function (native or virtual), not " +
-				Deno.inspect(callee),
+			() => "callee is not a function (native or virtual)",
 		);
 		return callee.invoke(this, subject, args);
 	}
@@ -1244,19 +1230,35 @@ export class VM {
 			case "AssignmentExpression": {
 				let value = this.evalExpr(expr.right);
 
-				if (expr.operator === "=") {
-					// no update
-				} else if (expr.operator === "+=") {
-					assert(
-						expr.left.type === "Identifier" ||
-							expr.left.type === "MemberExpression",
-						"only supported as assignment targets: Identifier and MemberExpression",
-					);
-					value = this.binExpr("+", expr.left, expr.right);
-				} else {
+				assert(
+					expr.left.type === "Identifier" ||
+						expr.left.type === "MemberExpression",
+					"only supported as assignment targets: Identifier and MemberExpression",
+				);
+
+				let binOp = "";
+
+				if (expr.operator === "=") binOp = "";
+				else if (expr.operator === "*=") binOp = "*";
+				else if (expr.operator === "-=") binOp = "-";
+				else if (expr.operator === "%=") binOp = "%";
+				else if (expr.operator === "&=") binOp = "&";
+				else if (expr.operator === "/=") binOp = "/";
+				else if (expr.operator === "<<=") binOp = "<<";
+				else if (expr.operator === ">>=") binOp = ">>";
+				else if (expr.operator === ">>>=") binOp = ">>>";
+				else if (expr.operator === "^=") binOp = "^";
+				else if (expr.operator === "|=") binOp = "|";
+				else {
 					throw new VMError(
-						"unsupported update assignment op. " + Deno.inspect(expr),
+						`unsupported update assignment op. [${expr.operator}]`,
 					);
+				}
+
+				if (binOp === "") {
+					// no update
+				} else {
+					value = this.binExpr(binOp, expr.left, expr.right);
 				}
 
 				return this.doAssignment(expr.left, value);
@@ -1448,7 +1450,7 @@ export class VM {
 						return { type: "boolean", value: ret };
 					} else {
 						throw new VMError(
-							"unsupported delete argument: " + Deno.inspect(expr),
+							"unsupported delete argument: " + expr.argument.type,
 						);
 					}
 				} else if (expr.operator === "typeof") {
@@ -1574,7 +1576,7 @@ export class VM {
 					callee = callThis.getProperty(name);
 					if (callee === undefined) {
 						throw new VMError(
-							`can't find method ${name} in ${Deno.inspect(callThis)}`,
+							`can't find method ${name} in 'this'`,
 						);
 					}
 				} else if (
@@ -1663,9 +1665,7 @@ export class VM {
 					return createRegExpFromNative(this, expr.value);
 				} else {
 					throw new VMError(
-						`unsupported literal value: ${typeof expr.value} ${
-							Deno.inspect(expr.value)
-						}`,
+						`unsupported literal value: ${typeof expr.value}`,
 					);
 				}
 			}
@@ -1958,7 +1958,7 @@ export class VM {
 		}
 
 		throw new VMError(
-			"not yet implemented: isTruthy: " + Deno.inspect(jsv),
+			"not yet implemented: isTruthy for type: " + jsv.type,
 		);
 	}
 
@@ -1970,8 +1970,7 @@ export class VM {
 
 		assert(
 			obj instanceof VMObject,
-			() =>
-				"vm bug: invalid return type from constructor: " + Deno.inspect(obj),
+			"vm bug: invalid return type from constructor",
 		);
 		obj.setProperty("constructor", constructor);
 
@@ -2028,9 +2027,7 @@ export class VM {
 			const name = targetExpr.name;
 			this.setVar(name, value);
 		} else {
-			throw new VMError(
-				"unsupported assignment target: " + Deno.inspect(targetExpr),
-			);
+			throw new VMError("unsupported assignment target: " + targetExpr.type);
 		}
 
 		return value;
@@ -2059,27 +2056,33 @@ export class VM {
 			return obj;
 		}
 
-		const cons: JSValue | undefined = {
-			number: this.globalObj.getProperty("Number"),
-			boolean: this.globalObj.getProperty("Boolean"),
-			string: this.globalObj.getProperty("String"),
-			symbol: this.globalObj.getProperty("Symbol"),
-			undefined: undefined,
-			null: undefined,
-		}[value.type];
-		if (cons) {
-			assert(
-				cons instanceof VMInvokable,
-				"bug: primitive wrapper constructor must be invokable",
-			);
-			const obj = this.performNew(cons, [value]);
-			assert(obj instanceof VMObject, "bug: new must return object");
-			return obj;
+		let cons: JSValue | undefined;
+		switch (value.type) {
+			case "number":
+				cons = this.globalObj.getProperty("Number");
+				break;
+			case "boolean":
+				cons = this.globalObj.getProperty("Boolean");
+				break;
+			case "string":
+				cons = this.globalObj.getProperty("String");
+				break;
+			case "symbol":
+				cons = this.globalObj.getProperty("Symbol");
+				break;
+			default:
+				return this.throwTypeError(
+					`can't convert value to object (type is ${value.type})`,
+				);
 		}
 
-		return this.throwTypeError(
-			"can't convert value to object: " + Deno.inspect(value),
+		assert(
+			cons instanceof VMInvokable,
+			"bug: primitive wrapper constructor must be invokable",
 		);
+		const obj = this.performNew(cons, [value]);
+		assert(obj instanceof VMObject, "bug: new must return object");
+		return obj;
 	}
 
 	coerceToBoolean(value: JSValue): boolean {
@@ -2096,7 +2099,7 @@ export class VM {
 		else if (value instanceof VMObject) ret = true;
 		else {
 			this.throwTypeError(
-				"can't convert value to boolean: " + Deno.inspect(value),
+				`can't convert value to boolean (type ${value.type})`,
 			);
 		}
 
@@ -2422,8 +2425,7 @@ export class VM {
 			this.defineVar("var", name, func);
 		} else {
 			throw new VMError(
-				"unsupported identifier for function declaration: " +
-					Deno.inspect(decl.id),
+				"unsupported identifier for function declaration: " + decl.id,
 			);
 		}
 
@@ -2969,7 +2971,7 @@ function expressionToPattern(argument: acorn.Expression): acorn.Pattern {
 		argument.type === "MemberExpression"
 	) return argument;
 	throw new VMError(
-		"bug: expression can't be used as pattern: " + Deno.inspect(argument),
+		"bug: expression can't be used as pattern, type " + argument.type,
 	);
 }
 

@@ -1212,6 +1212,39 @@ export class VM {
 				return completion;
 			}
 
+			case "SwitchStatement": {
+				const discriminant = this.evalExpr(stmt.discriminant);
+
+				const caseCount = stmt.cases.length;
+				let caseIndex = null;
+				let defaultIndex = null;
+				for (let i = 0; i < caseCount; i++) {
+					const branch = stmt.cases[i];
+					if (
+						typeof branch.test === "object" && branch.test !== null
+					) {
+						const testValue = this.evalExpr(branch.test);
+						if (this.tripleEqualValues(discriminant, testValue)) {
+							caseIndex = i;
+							break;
+						}
+					} else {
+						defaultIndex = i;
+					}
+				}
+
+				if (caseIndex === null) caseIndex = defaultIndex;
+				let completion: JSValue = { type: "undefined" };
+				if (caseIndex !== null) {
+					for (let i = caseIndex; i < caseCount; i++) {
+						for (const substmt of stmt.cases[i].consequent) {
+							completion = this.runStmt(substmt);
+						}
+					}
+				}
+				return completion;
+			}
+
 			default:
 				throw new VMError("not a (supported) statement: " + stmt.type);
 		}
@@ -2126,7 +2159,9 @@ export class VM {
 	tripleEqual(leftExpr: acorn.Expression, rightExpr: acorn.Expression) {
 		const left = this.evalExpr(leftExpr);
 		const right = this.evalExpr(rightExpr);
-
+		return this.tripleEqualValues(left, right);
+	}
+	tripleEqualValues(left: JSValue, right: JSValue) {
 		if (right.type !== left.type) return false;
 
 		if (left instanceof VMObject) return Object.is(left, right);

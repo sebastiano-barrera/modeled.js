@@ -2764,6 +2764,7 @@ function createGlobalObject() {
 		prototype: VMObject,
 		primType: PrimType,
 		coercer: (vm: VM, value: JSValue) => VMObject["primitive"],
+		postInit?: (vm: VM, obj: VMObject) => void,
 	) {
 		const cons = nativeVMFunc((vm, subject, args, options): JSValue => {
 			const arg: JSValue = args[0] === undefined
@@ -2774,6 +2775,7 @@ function createGlobalObject() {
 			if (options.isNew) {
 				subject = new VMObject(prototype);
 				subject.primitive = prim;
+				if (postInit) postInit(vm, subject);
 				return subject;
 			}
 
@@ -2841,6 +2843,13 @@ function createGlobalObject() {
 		PROTO_STRING,
 		"string",
 		(vm, x) => vm.coerceToString(x),
+		(_, obj) => {
+			assert(typeof obj.primitive === "string", "postinit string");
+			obj.setProperty("length", {
+				type: "number",
+				value: obj.primitive.length,
+			});
+		},
 	);
 	consString.setProperty(
 		"fromCharCode",

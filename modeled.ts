@@ -164,6 +164,10 @@ class VMObject {
 			return;
 		}
 
+		if (!descriptor.writable) {
+			vm?.throwError("TypeError", "property is not writable");
+		}
+
 		if (descriptor.set) {
 			assert(vm instanceof VM, "looking up described value but vm not passed");
 			return vm.performCall(descriptor.set, this, [value]);

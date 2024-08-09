@@ -31,7 +31,7 @@ if (args.single) {
   const outcome = await runTest262Case(test262Root, args.single);
   console.log(outcome);
 
-  } else {
+} else {
   const successes = []
   const skips = []
   const failures = []

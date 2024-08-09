@@ -1,5 +1,4 @@
 import * as Modeled from './modeled.ts'
-import testConfig from './testConfig.json' with {type: 'json'};
 
 import { parseArgs as parseArgsGeneric } from "https://deno.land/std@0.224.0/cli/parse_args.ts";
 import * as YAML from "@std/yaml";
@@ -19,6 +18,9 @@ try {
   console.error('while parsing command-line: ' + err)
   Deno.exit(1);
 }
+
+const testConfigRaw = await Deno.readTextFile(args.config || './testConfig.json');
+const testConfig = JSON.parse(testConfigRaw);
 
 const test262Root = args.test262;
 const preamble = {

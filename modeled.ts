@@ -109,6 +109,8 @@ class VMObject {
 	primitive?: boolean | string | number | bigint | symbol;
 	innerRE?: RegExp;
 
+	extensionAllowed: boolean = true;
+
 	constructor(private _proto: VMObject | null = PROTO_OBJECT) {}
 
 	resolveDescriptor(descriptor: Descriptor, vm?: VM) {
@@ -151,6 +153,13 @@ class VMObject {
 		return this.resolveDescriptor(descriptor, vm);
 	}
 	setProperty(name: PropName, value: JSValue, vm?: VM) {
+		if (name === "__proto__") {
+			// call setter
+			if (value instanceof VMObject) {
+				this.proto = value;
+			}
+			return;
+		}
 		const descriptor = this.descriptors.get(name);
 
 		// TODO Honor writable, configurable, etc.
@@ -200,6 +209,10 @@ class VMObject {
 		return this._proto;
 	}
 	set proto(newProto: VMObject | null) {
+		if (!this.extensionAllowed) {
+			return;
+		}
+
 		assert(
 			newProto === null || newProto instanceof VMObject,
 			"VMObject's prototype must be VMObject or null",
@@ -2790,6 +2803,31 @@ function createGlobalObject() {
 			return ret;
 		}),
 	);
+	consObject.setProperty(
+		"preventExtensions",
+		nativeVMFunc((vm, _subject, args) => {
+			const arg = args[0] || { type: "undefined" };
+			if (!(arg instanceof VMObject)) {
+				return vm.throwError("TypeError", "argument must be object");
+			}
+
+			arg.extensionAllowed = false;
+			return arg;
+		}),
+	);
+	consObject.setProperty(
+		"getPrototypeOf",
+		nativeVMFunc((vm, _subject, args) => {
+			const arg = args[0] || { type: "undefined" };
+			if (!(arg instanceof VMObject)) {
+				return vm.throwError("TypeError", "argument must be object");
+			}
+
+			if (arg.proto === null) return { type: "null" };
+			return arg.proto;
+		}),
+	);
+
 	G.setProperty("Object", consObject);
 
 	function addPrimitiveWrapperConstructor(

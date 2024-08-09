@@ -1316,23 +1316,23 @@ export class VM {
 			}
 
 			case "UpdateExpression": {
-				const value = this.evalExpr(expr.argument);
-				if (value.type !== "number") {
-					this.throwTypeError(
-						`update operation only support on numbers, not ${value.type}`,
-					);
-				}
+				const num = this.coerceToNumber(this.evalExpr(expr.argument));
+				const valuePre: JSValue = { type: "number", value: num };
 
-				let newValue: JSValue;
+				let valuePost: JSValue;
 				if (expr.operator === "++") {
-					newValue = { type: "number", value: value.value + 1 };
+					const one: JSValue = { type: "number", value: 1 };
+					valuePost = this.evalAddition(valuePre, one);
 				} else if (expr.operator === "--") {
-					newValue = { type: "number", value: value.value - 1 };
+					valuePost = this.arithmeticOpNumeric("-", num, 1);
 				} else {
 					throw new VMError("unsupported update operator: " + expr.operator);
 				}
 
-				return this.doAssignment(expressionToPattern(expr.argument), newValue);
+				this.doAssignment(expressionToPattern(expr.argument), valuePost);
+
+				if (expr.prefix) return valuePost;
+				return valuePre;
 			}
 
 			case "FunctionExpression": {
@@ -1769,6 +1769,16 @@ export class VM {
 				obj = obj.proto;
 			}
 			return { type: "boolean", value: false };
+		} else if (operator === "in") {
+			let key: PropName;
+
+			const lv = this.evalExpr(left);
+			if (lv.type === "symbol") key = lv.value;
+			else key = this.coerceToString(lv);
+
+			const obj = this.coerceToObject(this.evalExpr(right));
+			const found = obj.getProperty(key) !== undefined;
+			return { type: "boolean", value: found };
 		} else if (operator === "-") return this.arithmeticOp("-", left, right);
 		else if (operator === "*") return this.arithmeticOp("*", left, right);
 		else if (operator === "/") return this.arithmeticOp("/", left, right);
@@ -1824,14 +1834,19 @@ export class VM {
 		left: acorn.Expression,
 		right: acorn.Expression,
 	): JSValue {
-		// coercion and evalExpr are interleaved!
-		// if coercion of left throws an error, right is never even evaluated
 		const av = this.evalExpr(left);
 		const bv = this.evalExpr(right);
 
 		const a = this.coerceToNumeric(av);
 		const b = this.coerceToNumeric(bv);
+		return this.arithmeticOpNumeric(op, a, b);
+	}
 
+	arithmeticOpNumeric(
+		op: string,
+		a: number | bigint,
+		b: number | bigint,
+	): JSValue {
 		// this could be shortened by taking advantage of JS's dynamicness, but
 		// this version makes it easier to transition to statically-typed impls
 		if (typeof a === "number" && typeof b === "number") {

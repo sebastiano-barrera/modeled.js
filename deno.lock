@@ -3,7 +3,8 @@
   "packages": {
     "specifiers": {
       "jsr:@std/yaml@^0.224.3": "jsr:@std/yaml@0.224.3",
-      "npm:acorn": "npm:acorn@8.12.1"
+      "npm:acorn": "npm:acorn@8.12.1",
+      "npm:acorn-walk": "npm:acorn-walk@8.3.3"
     },
     "jsr": {
       "@std/yaml@0.224.3": {
@@ -11,6 +12,12 @@
       }
     },
     "npm": {
+      "acorn-walk@8.3.3": {
+        "integrity": "sha512-MxXdReSRhGO7VlFe1bRG/oI7/mdLV9B9JJT0N8vZOhF7gFRR5l3M8W9G8JxmKV+JC5mGqJ0QvqfSOLsCPa4nUw==",
+        "dependencies": {
+          "acorn": "acorn@8.12.1"
+        }
+      },
       "acorn@8.12.1": {
         "integrity": "sha512-tcpGyI9zbizT9JbV6oYE477V6mTlXvvi0T0G3SNIYE2apm/G5huBa1+K89VGeovbg+jycCrfhl3ADxErOuO6Jg==",
         "dependencies": {}
@@ -24,7 +31,8 @@
   },
   "workspace": {
     "dependencies": [
-      "jsr:@std/yaml@^0.224.3"
+      "jsr:@std/yaml@^0.224.3",
+      "npm:acorn-walk@^8.3.3"
     ]
   }
 }

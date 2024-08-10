@@ -1,4 +1,5 @@
 import * as acorn from "npm:acorn";
+import * as acornWalk from "npm:acorn-walk";
 
 // overview of the plan:
 //
@@ -952,6 +953,8 @@ export class VM {
 	runProgram(node: acorn.Program) {
 		assert(node.sourceType === "script", "only script is supported");
 		assert(node.type === "Program", "must be called with a Program node");
+
+		hoistDeclarations(node);
 
 		return this.#withSyntaxContext(node, () => {
 			try {
@@ -3108,6 +3111,10 @@ function expressionToPattern(argument: acorn.Expression): acorn.Pattern {
 	throw new VMError(
 		"bug: expression can't be used as pattern, type " + argument.type,
 	);
+}
+
+function hoistDeclarations(node: acorn.Node) {
+	// TODO!
 }
 
 // vim:ts=4:sts=0:sw=0:et

@@ -1,5 +1,6 @@
 {
   "imports": {
-    "@std/yaml": "jsr:@std/yaml@^0.224.3"
+    "@std/yaml": "jsr:@std/yaml@^0.224.3",
+    "acorn-walk": "npm:acorn-walk@^8.3.3"
   }
 }

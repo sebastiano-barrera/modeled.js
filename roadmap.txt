@@ -1,0 +1,3 @@
+- scoping rules (declaration hoisting, etc.)
+- arrays empty elements
+

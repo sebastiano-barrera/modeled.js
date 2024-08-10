@@ -1,3 +1,4 @@
 - scoping rules (declaration hoisting, etc.)
 - arrays empty elements
 
+- patterns as assignment targets

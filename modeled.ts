@@ -95,6 +95,9 @@ type Descriptor = {
 	configurable: boolean;
 	enumerable: boolean;
 	writable: boolean;
+	// when writable and discardWriteSilently are both true, writes are discarded
+	// without any error
+	discardWriteSilently?: boolean;
 };
 
 type PropName = string | symbol;
@@ -175,7 +178,11 @@ class VMObject {
 		}
 
 		if (!descriptor.writable) {
-			vm?.throwError("TypeError", "property is not writable");
+			if (descriptor.discardWriteSilently) {
+				return;
+			}
+			assert(vm instanceof VM, "looking up described value but vm not passed");
+			return vm.throwError("TypeError", "property is not writable");
 		}
 
 		if (descriptor.set) {
@@ -184,8 +191,9 @@ class VMObject {
 		} else if (descriptor.get === undefined) {
 			descriptor.value = value;
 		} else {
+			assert(vm instanceof VM, "looking up described value but vm not passed");
 			// we have a getter but not a setter
-			vm?.throwError("TypeError", "descriptor has getter but no setter");
+			vm.throwError("TypeError", "descriptor has getter but no setter");
 		}
 	}
 	defineProperty(name: PropName, descriptor: Descriptor) {
@@ -2884,7 +2892,6 @@ function createGlobalObject() {
 		type: "number",
 		value: -Infinity,
 	});
-	consNumber.setProperty("NaN", { type: "number", value: NaN });
 	consNumber.setProperty("MIN_VALUE", {
 		type: "number",
 		value: Number.MIN_VALUE,
@@ -2892,6 +2899,22 @@ function createGlobalObject() {
 	consNumber.setProperty("MAX_VALUE", {
 		type: "number",
 		value: Number.MAX_VALUE,
+	});
+
+	// writes are *silently* discarded (so, it doens't work to set writable: false)
+	consNumber.defineProperty("NaN", {
+		value: { type: "number", value: NaN },
+		configurable: false,
+		writable: false,
+		discardWriteSilently: true,
+		enumerable: false,
+	});
+	G.defineProperty("NaN", {
+		value: { type: "number", value: NaN },
+		configurable: false,
+		writable: false,
+		discardWriteSilently: true,
+		enumerable: false,
 	});
 
 	G.setProperty(

@@ -1161,7 +1161,7 @@ export class VM {
 						const paramName = stmt.handler.param.name;
 						const body = stmt.handler.body;
 						return this.withScope(() => {
-							this.defineVar("var", paramName, err.exceptionValue);
+							this.defineVar("let", paramName, err.exceptionValue);
 							this.setDoNotDelete(paramName);
 							return this.runStmt(body);
 						});

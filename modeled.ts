@@ -292,7 +292,7 @@ abstract class VMInvokable extends VMObject {
 	isStrict = false;
 
 	params?: string[];
-	name: string | null = null;
+	canConstruct: boolean = false;
 
 	constructor(consPrototype?: VMObject) {
 		super(PROTO_FUNCTION);
@@ -496,6 +496,7 @@ class VMFunction extends VMInvokable {
 
 	name: string | null = null;
 	functionID: number = ++VMFunction.#lastID;
+	override readonly canConstruct = true;
 
 	constructor(public params: string[], public body: Node) {
 		super();
@@ -1603,6 +1604,9 @@ export class VM {
 
 			case "NewExpression": {
 				const constructor = this.evalExpr(expr.callee);
+				if (!(constructor instanceof VMInvokable)) {
+					this.throwError("TypeError", "constructor must be callable");
+				}
 				const args = expr.arguments.map((argNode) => {
 					assert(
 						argNode.type !== "SpreadElement",
@@ -1610,9 +1614,6 @@ export class VM {
 					);
 					return this.evalExpr(argNode);
 				});
-				if (!(constructor instanceof VMInvokable)) {
-					this.throwError("TypeError", "constructor must be callable");
-				}
 				return this.performNew(constructor, args);
 			}
 
@@ -2063,6 +2064,13 @@ export class VM {
 	}
 
 	performNew(constructor: VMInvokable, args: JSValue[]) {
+		if (!constructor.canConstruct) {
+			return this.throwError(
+				"TypeError",
+				"new X(...): X is callable but can't be used as constuctor",
+			);
+		}
+
 		const initObj = new VMObject();
 
 		let obj = constructor.invoke(this, initObj, args, { isNew: true });
@@ -2140,6 +2148,10 @@ export class VM {
 		const excCons = this.globalObj.getProperty(constructorName, this);
 		if (!(excCons instanceof VMInvokable)) {
 			throw new VMError("exception constructor must be invokable");
+		}
+		// avoid infinite recursion with performNew
+		if (constructorName === "TypeError") {
+			assert(excCons.canConstruct, "global  is not a constructor!");
 		}
 		const messageValue: JSValue = { type: "string", value: message };
 		const exc = this.performNew(excCons, [messageValue]);
@@ -2564,8 +2576,16 @@ type NativeFunc = (
 	options: InvokeOpts,
 ) => JSValue;
 
-function nativeVMFunc(innerImpl: NativeFunc): VMInvokable {
+interface NativeFuncOptions {
+	isConstructor?: boolean;
+}
+
+function nativeVMFunc(
+	innerImpl: NativeFunc,
+	options: NativeFuncOptions = {},
+): VMInvokable {
 	return new class extends VMInvokable {
+		canConstruct = options.isConstructor ?? false;
 		// in innerImpl, `this` is the VMInvokable object
 		run = innerImpl;
 	}();
@@ -2614,14 +2634,14 @@ function createGlobalObject() {
 		assertIsObject(vm, subject);
 		subject.setProperty("message", args[0]);
 		return subject;
-	});
+	}, { isConstructor: true });
 	G.setProperty("Error", consError);
-	const prototype = consError.getProperty("prototype");
+	const protoError = consError.getProperty("prototype");
 	assert(
-		prototype instanceof VMObject,
+		protoError instanceof VMObject,
 		"bug: function.prototype must be object",
 	);
-	prototype.setProperty("name", { type: "string", value: "Error" });
+	protoError.setProperty("name", { type: "string", value: "Error" });
 
 	function createSimpleErrorType(name: string) {
 		const Error = G.getOwnProperty("Error");
@@ -2636,6 +2656,7 @@ function createGlobalObject() {
 		G.setProperty(
 			name,
 			new class extends VMInvokable {
+				canConstruct = true;
 				constructor() {
 					super(proto);
 				}
@@ -2675,7 +2696,7 @@ function createGlobalObject() {
 		}
 
 		return vm.coerceToObject(arg);
-	});
+	}, { isConstructor: true });
 	consObject.setProperty("prototype", PROTO_OBJECT);
 	consObject.setProperty(
 		"defineProperty",
@@ -2985,7 +3006,7 @@ function createGlobalObject() {
 			"Only supported invoking via new Array()",
 		);
 		return new VMArray();
-	});
+	}, { isConstructor: true });
 	G.setProperty("Array", consArray);
 	consArray.setProperty(
 		"isArray",
@@ -3028,7 +3049,7 @@ function createGlobalObject() {
 			type: "BlockStatement",
 		};
 		return vm.makeFunction([], blockStmt, { scopeStrictnessIrrelevant: true });
-	});
+	}, { isConstructor: true });
 	G.setProperty("Function", consFunction);
 	consFunction.setProperty("prototype", PROTO_FUNCTION);
 
@@ -3038,7 +3059,7 @@ function createGlobalObject() {
 			return vm.throwTypeError("RegExp constructor argument must be string");
 		}
 		return createRegExpFromNative(vm, new RegExp(arg.value));
-	});
+	}, { isConstructor: true });
 	G.setProperty("RegExp", consRegExp);
 	consRegExp.setProperty("prototype", PROTO_REGEXP);
 
@@ -3112,7 +3133,7 @@ function createGlobalObject() {
 
 		if (typeof name === "string" && value instanceof VMInvokable) {
 			// value is a constructor
-			value.name = name;
+			value.setProperty("name", { type: "string", value: name });
 
 			const prototype = value.getProperty("prototype");
 			assert(
@@ -3136,7 +3157,7 @@ function expressionToPattern(argument: acorn.Expression): acorn.Pattern {
 	);
 }
 
-function hoistDeclarations(node: acorn.Node) {
+function hoistDeclarations(_node: acorn.Node) {
 	// TODO!
 }
 

@@ -2885,7 +2885,7 @@ function createGlobalObject() {
 			const ret = { type: primType, value: prim };
 			assertIsValue(ret);
 			return ret;
-		});
+		}, { isConstructor: true });
 
 		G.setProperty(name, cons);
 		cons.setProperty("prototype", prototype);

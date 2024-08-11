@@ -1,4 +1,9 @@
 - scoping rules (declaration hoisting, etc.)
-- arrays empty elements
-
+- "holey" arrays (empty, rather than undefined, elements)
 - patterns as assignment targets
+
+
+
+
+
+

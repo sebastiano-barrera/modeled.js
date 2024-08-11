@@ -1574,10 +1574,21 @@ export class VM {
 						);
 					}
 				} else if (expr.operator === "typeof") {
-					const value = this.evalExpr(expr.argument);
-					if (value.type === "null") {
-						return { type: "string", value: "object" };
+					if (expr.argument.type === "Identifier") {
+						const value = this.currentScope.lookupVar(expr.argument.name);
+						// particular case in the language: naked UNBOUND identifier result in undefined
+						if (value === undefined) {
+							return { type: "string", value: "undefined" };
+						}
+						if (value.type === "null") {
+							return { type: "string", value: "object" };
+						}
+						return { type: "string", value: value.type };
 					} else {
+						const value = this.evalExpr(expr.argument);
+						if (value.type === "null") {
+							return { type: "string", value: "object" };
+						}
 						return { type: "string", value: value.type };
 					}
 				} else if (expr.operator === "!") {

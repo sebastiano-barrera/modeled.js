@@ -259,6 +259,15 @@ class VMObject {
 		// we reuse the host JS VM logic for now
 		return Object.is(this, other);
 	}
+
+	walkPrototypeChain<T>(action: (o: VMObject) => T | null): T | undefined {
+		let value, cur: VMObject | null;
+		for (cur = this; cur !== null; cur = cur.proto) {
+			if ((value = action(cur)) !== null) {
+				return value;
+			}
+		}
+	}
 }
 
 function assertIsObject(vm: VM, value: JSValue): asserts value is VMObject {
@@ -475,6 +484,15 @@ PROTO_OBJECT.setProperty(
 		const name = vm.coerceToString(args[0] || { type: "undefined" });
 		const ret = subject.containsOwnProperty(name);
 		return { type: "boolean", value: ret };
+	}),
+);
+PROTO_OBJECT.setProperty(
+	"isPrototypeOf",
+	nativeVMFunc((vm, subject, args) => {
+		const candidate = vm.coerceToObject(subject);
+		const obj = vm.coerceToObject(args[0] || { type: "undefined" });
+		const ret = obj.walkPrototypeChain((cur) => cur.is(candidate) || null);
+		return { type: "boolean", value: ret ?? false };
 	}),
 );
 
@@ -2988,13 +3006,8 @@ function createGlobalObject() {
 					"argument 2 (the candidate prototype) must be an object",
 				);
 			}
-
-			for (let cur: VMObject | null = obj; cur !== null; cur = cur.proto) {
-				if (cur.is(candidate)) {
-					return { type: "boolean", value: true };
-				}
-			}
-			return { type: "boolean", value: false };
+			const ret = obj.walkPrototypeChain((cur) => cur.is(candidate) || null);
+			return { type: "boolean", value: ret ?? false };
 		}),
 	);
 	G.setProperty("Object", consObject);

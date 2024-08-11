@@ -1903,8 +1903,14 @@ export class VM {
 					return { type: "number", value: a & b };
 				case "|":
 					return { type: "number", value: a | b };
-				case "/":
-					return { type: "number", value: b === 0 ? Infinity : (a / b) };
+				case "/": {
+					// deno-fmt-ignore
+					const value 
+						= Object.is(b, +0) ? Infinity 
+						: Object.is(b, +0) ? -Infinity 
+						: (a / b);
+					return { type: "number", value };
+				}
 				case "%":
 					return { type: "number", value: a % b };
 				case ">>>":

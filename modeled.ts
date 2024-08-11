@@ -3075,12 +3075,16 @@ function createGlobalObject() {
 		value: Symbol.toPrimitive,
 	});
 
-	const consArray = nativeVMFunc((_vm, subject) => {
+	const consArray = nativeVMFunc((_vm, _, args, callFlags) => {
 		assert(
-			subject.type === "object",
-			"Only supported invoking via new Array()",
+			callFlags.isNew ?? false,
+			"unsupported: Array not called via new Array",
 		);
-		return new VMArray();
+
+		// TODO same as `arguments`... avoid the copy?
+		const array = new VMArray();
+		array.arrayElements.push(...args);
+		return array;
 	}, { isConstructor: true });
 	G.setProperty("Array", consArray);
 	consArray.setProperty(

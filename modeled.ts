@@ -134,6 +134,13 @@ class VMObject {
 	getOwnPropertyNames(): IterableIterator<PropName> {
 		return this.descriptors.keys();
 	}
+	*getOwnEnumerablePropertyNames(): IterableIterator<PropName> {
+		for (const [name, descr] of this.descriptors) {
+			if (descr.enumerable) {
+				yield name;
+			}
+		}
+	}
 	getOwnProperty(name: PropName, vm = undefined): JSValue | undefined {
 		const descriptor = this.getOwnPropertyDescriptor(name);
 		if (descriptor === undefined) return undefined;
@@ -1227,15 +1234,20 @@ export class VM {
 					}
 
 					assert(iteree instanceof VMObject, "only supported: object iteree");
-					const properties = iteree.getOwnPropertyNames();
+					const properties = iteree.getOwnEnumerablePropertyNames();
 					for (const name of properties) {
-						assert(typeof name === "string", "unsupported: symbol properties");
-						const value = iteree.getOwnProperty(name);
-						assert(
-							value !== undefined,
-							"bug: getOwnPropertyNames returned a property that does not exist",
-						);
-						this.doAssignment(asmtTarget, value);
+						let nameJSV: JSValue;
+						if (typeof name === "string") {
+							nameJSV = { type: "string", value: name };
+						} else if (typeof name === "symbol") {
+							nameJSV = { type: "symbol", value: name };
+						} else {
+							throw new AssertionError(
+								`getOwnPropertyNames must return string or symbol, not ${typeof name}`,
+							);
+						}
+
+						this.doAssignment(asmtTarget, nameJSV);
 						this.runStmt(stmt.body);
 					}
 
@@ -2112,7 +2124,12 @@ export class VM {
 			obj instanceof VMObject,
 			"vm bug: invalid return type from constructor",
 		);
-		obj.setProperty("constructor", constructor);
+		obj.defineProperty("constructor", {
+			value: constructor,
+			configurable: true,
+			enumerable: false,
+			writable: true,
+		});
 
 		let prototype = constructor.getProperty("prototype");
 		if (prototype === undefined) {

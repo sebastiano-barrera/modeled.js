@@ -3131,6 +3131,19 @@ function createGlobalObject() {
 	const objMath = new VMObject();
 	G.setProperty("Math", objMath);
 
+	objMath.setProperty(
+		"pow",
+		nativeVMFunc((vm, _, args) => {
+			const arg0 = args[0] || { type: "undefined" };
+			const arg1 = args[1] || { type: "undefined" };
+
+			const base = vm.coerceToNumber(arg0);
+			const exp = vm.coerceToNumber(arg1);
+			const res = Math.pow(base, exp);
+			return { type: "number", value: res };
+		}),
+	);
+
 	for (const name of G.getOwnPropertyNames()) {
 		const value = G.getOwnProperty(name);
 

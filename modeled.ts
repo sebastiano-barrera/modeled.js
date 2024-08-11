@@ -1840,13 +1840,13 @@ export class VM {
 		} else if (operator === "<") {
 			return { type: "boolean", value: this.isLessThan(ap, bp) };
 		} else if (operator === "<=") {
-			const ret = tri2bool(triNegate(this.isLessThan(bp, ap)));
+			const ret = tri2bool(triNegate(this.compareLessThan(bp, ap)));
 			return { type: "boolean", value: ret };
 		} else if (operator === ">") {
 			const ret = this.isLessThan(bp, ap);
 			return { type: "boolean", value: ret };
 		} else if (operator === ">=") {
-			const ret = tri2bool(triNegate(this.isLessThan(ap, bp)));
+			const ret = tri2bool(triNegate(this.compareLessThan(ap, bp)));
 			return { type: "boolean", value: ret };
 		}
 

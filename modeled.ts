@@ -2946,7 +2946,26 @@ function createGlobalObject() {
 			return arg.proto;
 		}),
 	);
+	consObject.setProperty(
+		"isPrototypeOf",
+		nativeVMFunc((vm, _subject, args) => {
+			const obj = vm.coerceToObject(args[0] || { type: "undefined" });
+			const candidate = args[1];
+			if (!(candidate instanceof VMObject)) {
+				return vm.throwError(
+					"TypeError",
+					"argument 2 (the candidate prototype) must be an object",
+				);
+			}
 
+			for (let cur: VMObject | null = obj; cur !== null; cur = cur.proto) {
+				if (cur.is(candidate)) {
+					return { type: "boolean", value: true };
+				}
+			}
+			return { type: "boolean", value: false };
+		}),
+	);
 	G.setProperty("Object", consObject);
 
 	function addPrimitiveWrapperConstructor(

@@ -3128,6 +3128,9 @@ function createGlobalObject() {
 		}),
 	);
 
+	const objMath = new VMObject();
+	G.setProperty("Math", objMath);
+
 	for (const name of G.getOwnPropertyNames()) {
 		const value = G.getOwnProperty(name);
 

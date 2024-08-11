@@ -575,6 +575,33 @@ PROTO_STRING.setProperty(
 	}),
 );
 
+PROTO_STRING.setProperty(
+	"valueOf",
+	nativeVMFunc((vm: VM, subject: JSValue, _: JSValue[]) => {
+		const subjectObj = vm.coerceToObject(subject);
+		if (typeof subjectObj.primitive !== "string") {
+			return vm.throwError(
+				"TypeError",
+				"`this` is not a String (string wrapper)",
+			);
+		}
+		return { type: "string", value: subjectObj.primitive };
+	}),
+);
+PROTO_STRING.setProperty(
+	"toString",
+	nativeVMFunc((vm: VM, subject: JSValue, _: JSValue[]) => {
+		const subjectObj = vm.coerceToObject(subject);
+		if (typeof subjectObj.primitive !== "string") {
+			return vm.throwError(
+				"TypeError",
+				"`this` is not a String (string wrapper)",
+			);
+		}
+		return { type: "string", value: subjectObj.primitive };
+	}),
+);
+
 PROTO_NUMBER.setProperty(
 	"toString",
 	nativeVMFunc((vm, subject, _args) => {
@@ -2952,7 +2979,7 @@ function createGlobalObject() {
 		"Number",
 		PROTO_NUMBER,
 		"number",
-		(vm, x) => vm.coerceToNumber(x),
+		(vm, x) => x.type === "undefined" ? 0 : vm.coerceToNumber(x),
 	);
 	consNumber.setProperty("POSITIVE_INFINITY", {
 		type: "number",
@@ -3008,7 +3035,7 @@ function createGlobalObject() {
 		"String",
 		PROTO_STRING,
 		"string",
-		(vm, x) => vm.coerceToString(x),
+		(vm, x) => x.type === "undefined" ? "" : vm.coerceToString(x),
 		(_, obj) => {
 			assert(typeof obj.primitive === "string", "postinit string");
 			obj.setProperty("length", {
@@ -3164,6 +3191,19 @@ function createGlobalObject() {
 				console.log(arg);
 			}
 			return { type: "undefined" };
+		}),
+	);
+
+	G.setProperty(
+		"$toPrimitive",
+		nativeVMFunc((vm, _subject, args) => {
+			if (args.length !== 1) {
+				return vm.throwError(
+					"TypeError",
+					"$toPrimitive must be called with 1 argument",
+				);
+			}
+			return vm.coerceToPrimitive(args[0]);
 		}),
 	);
 

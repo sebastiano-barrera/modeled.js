@@ -1062,6 +1062,10 @@ export class VM {
 				this.currentScope = null;
 				return { outcome: "success" };
 			} catch (error) {
+				assert(
+					error.continue === undefined && error.break === undefined,
+					"vm bug: control-flow utility exception leaked!",
+				);
 				if (error instanceof ProgramException) {
 					const excval = error.exceptionValue;
 					const message = excval.type === "object"

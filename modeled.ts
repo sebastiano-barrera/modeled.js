@@ -1206,20 +1206,25 @@ export class VM {
 			case "ForInStatement": {
 				const iteree = this.evalExpr(stmt.right);
 				return this.withScope(() => {
-					assert(
-						stmt.left.type === "VariableDeclaration",
-						"in for(...in...) statement: patterns not supported",
-					);
-					this.runStmt(stmt.left);
+					let asmtTarget: acorn.Pattern;
 
-					assert(
-						stmt.left.declarations.length === 1 &&
-							stmt.left.declarations[0].type === "VariableDeclarator" &&
-							stmt.left.declarations[0].init === null &&
-							stmt.left.declarations[0].id.type === "Identifier",
-						"only supported: single declaration with no init and a simple identifier as the pattern",
-					);
-					const asmtTarget = stmt.left.declarations[0].id;
+					if (stmt.left.type === "VariableDeclaration") {
+						assert(
+							stmt.left.declarations.length === 1 &&
+								stmt.left.declarations[0].type === "VariableDeclarator" &&
+								stmt.left.declarations[0].init === null &&
+								stmt.left.declarations[0].id.type === "Identifier",
+							"only supported: single declaration with no init and a simple identifier as the pattern",
+						);
+						this.runStmt(stmt.left);
+						asmtTarget = stmt.left.declarations[0].id;
+					} else if (stmt.left.type === "Identifier") {
+						asmtTarget = stmt.left;
+					} else {
+						throw new VMError(
+							`in for(...in...) statement: left-hand side syntax not supported: ${stmt.left.type}`,
+						);
+					}
 
 					assert(iteree instanceof VMObject, "only supported: object iteree");
 					const properties = iteree.getOwnPropertyNames();

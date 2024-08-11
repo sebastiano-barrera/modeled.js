@@ -175,12 +175,13 @@ class VMObject {
 
 		// TODO Honor writable, configurable, etc.
 		if (descriptor === undefined) {
-			this.descriptors.set(name, {
+			assert(vm instanceof VM, "looking up described value but vm not passed");
+			this.defineProperty(name, {
 				value,
 				configurable: true,
 				writable: true,
 				enumerable: true,
-			});
+			}, vm);
 			return;
 		}
 
@@ -203,8 +204,15 @@ class VMObject {
 			vm.throwError("TypeError", "descriptor has getter but no setter");
 		}
 	}
-	defineProperty(name: PropName, descriptor: Descriptor) {
+	defineProperty(name: PropName, descriptor: Descriptor, vm: VM) {
 		// TODO Propertly honor writable, configurable
+		if (!this.extensionAllowed) {
+			return vm.throwError(
+				"TypeError",
+				"can't define new property on non-extensible object",
+			);
+		}
+
 		this.descriptors.set(name, descriptor);
 	}
 	deleteProperty(name: PropName): boolean {
@@ -265,7 +273,7 @@ class VMArray extends VMObject {
 			writable: false,
 			configurable: false,
 			enumerable: false,
-		});
+		}, null);
 	}
 
 	getIndex(index: number) {

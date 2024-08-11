@@ -1790,13 +1790,25 @@ export class VM {
 				return { type: "boolean", value: false };
 			}
 
+			const proto = constructor.getProperty("prototype");
+			if (!(proto instanceof VMObject)) {
+				return this.throwError(
+					"TypeError",
+					"constructor's `prototype` property is not object",
+				);
+			}
+
 			while (obj !== null) {
-				const check = obj.getProperty("constructor");
-				if (check instanceof VMObject && check.is(constructor)) {
+				assert(
+					obj instanceof VMObject,
+					"item in prototype chain is not object!",
+				);
+				if (obj.is(proto)) {
 					return { type: "boolean", value: true };
 				}
 				obj = obj.proto;
 			}
+
 			return { type: "boolean", value: false };
 		} else if (operator === "in") {
 			let key: PropName;

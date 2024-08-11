@@ -3,7 +3,7 @@ import testMeta from './testMeta.json' with {type: 'json'};
 
 const fraction = 1.0
 const predicate = path => (
-  path.startsWith('test/language/types/') 
+  path.startsWith('test/language/block-scope/') 
   && (testMeta.testCases[path] || {}).features === undefined 
   && Math.random() < fraction
 );

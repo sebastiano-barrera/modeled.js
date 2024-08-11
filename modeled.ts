@@ -39,8 +39,6 @@ function assertIsValue(t: { type: string; value?: any }): asserts t is JSValue {
 	assert(cond, () => `invalid JSValue (${t.type}): ${Deno.inspect(t)}`);
 }
 
-class VMError extends Error {}
-
 type JSValue =
 	| JSPrimitive
 	| VMObject;
@@ -58,6 +56,20 @@ type PrimType = JSValue["type"];
 
 interface Node extends acorn.Node {
 	sourceFile?: string;
+}
+
+// Throw an ExceptionRequest instance when a JavaScript exception should be
+// thrown, but the current VM instance is not available in the current scope.
+//
+// If there is a VM "in" the call stack, it will transform the ExceptionRequest
+// into a proper JS exception.
+class ExceptionRequest extends Error {
+	constructor(
+		public constructorName: string,
+		public message: string,
+	) {
+		super(message);
+	}
 }
 
 class ProgramException extends Error {
@@ -175,13 +187,12 @@ class VMObject {
 
 		// TODO Honor writable, configurable, etc.
 		if (descriptor === undefined) {
-			assert(vm instanceof VM, "looking up described value but vm not passed");
 			this.defineProperty(name, {
 				value,
 				configurable: true,
 				writable: true,
 				enumerable: true,
-			}, vm);
+			});
 			return;
 		}
 
@@ -204,10 +215,10 @@ class VMObject {
 			vm.throwError("TypeError", "descriptor has getter but no setter");
 		}
 	}
-	defineProperty(name: PropName, descriptor: Descriptor, vm: VM) {
+	defineProperty(name: PropName, descriptor: Descriptor) {
 		// TODO Propertly honor writable, configurable
 		if (!this.extensionAllowed) {
-			return vm.throwError(
+			throw new ExceptionRequest(
 				"TypeError",
 				"can't define new property on non-extensible object",
 			);
@@ -273,7 +284,7 @@ class VMArray extends VMObject {
 			writable: false,
 			configurable: false,
 			enumerable: false,
-		}, null);
+		});
 	}
 
 	getIndex(index: number) {
@@ -968,6 +979,10 @@ export class VM {
 			this.synCtx.push(node);
 			return inner();
 		} catch (e) {
+			if (e instanceof ExceptionRequest) {
+				return this.throwError(e.constructorName, e.message);
+			}
+
 			if (typeof e === "object" && e.context === undefined) {
 				// preserve *some* context
 				e.context = [...this.synCtx];
@@ -1134,7 +1149,7 @@ export class VM {
 						});
 					} else {
 						// either pass the ProgramException to another of the program's try blocks
-						// or pass the VMError to the VM caller
+						// or pass the AssertionError to the VM caller
 						throw err;
 					}
 				} finally {
@@ -1175,7 +1190,7 @@ export class VM {
 				if (
 					stmt.kind !== "var" && stmt.kind !== "let" && stmt.kind !== "const"
 				) {
-					throw new VMError("unsupported var decl type: " + stmt.kind);
+					throw new AssertionError("unsupported var decl type: " + stmt.kind);
 				}
 
 				let completion: JSValue = { type: "undefined" };
@@ -1196,7 +1211,7 @@ export class VM {
 							completion = value;
 						}
 					} else {
-						throw new VMError(
+						throw new AssertionError(
 							"unsupported declarator id type: " + decl.id.type,
 						);
 					}
@@ -1263,7 +1278,7 @@ export class VM {
 					} else if (stmt.left.type === "Identifier") {
 						asmtTarget = stmt.left;
 					} else {
-						throw new VMError(
+						throw new AssertionError(
 							`in for(...in...) statement: left-hand side syntax not supported: ${stmt.left.type}`,
 						);
 					}
@@ -1340,7 +1355,7 @@ export class VM {
 			}
 
 			default:
-				throw new VMError("not a (supported) statement: " + stmt.type);
+				throw new AssertionError("not a (supported) statement: " + stmt.type);
 		}
 	}
 
@@ -1378,7 +1393,7 @@ export class VM {
 				else if (expr.operator === "^=") binOp = "^";
 				else if (expr.operator === "|=") binOp = "|";
 				else {
-					throw new VMError(
+					throw new AssertionError(
 						`unsupported update assignment op. [${expr.operator}]`,
 					);
 				}
@@ -1403,7 +1418,9 @@ export class VM {
 				} else if (expr.operator === "--") {
 					valuePost = this.arithmeticOpNumeric("-", num, 1);
 				} else {
-					throw new VMError("unsupported update operator: " + expr.operator);
+					throw new AssertionError(
+						"unsupported update operator: " + expr.operator,
+					);
 				}
 
 				this.doAssignment(expressionToPattern(expr.argument), valuePost);
@@ -1459,7 +1476,7 @@ export class VM {
 					) {
 						const func = this.evalExpr(propertyNode.value);
 						if (!(func instanceof VMInvokable)) {
-							throw new VMError(
+							throw new AssertionError(
 								"VM bug: getter/setter was not evaluated as function?",
 							);
 						}
@@ -1470,7 +1487,7 @@ export class VM {
 							writable: false,
 						});
 					} else {
-						throw new VMError(
+						throw new AssertionError(
 							"unsupported property kind: " + propertyNode.kind,
 						);
 					}
@@ -1577,7 +1594,7 @@ export class VM {
 						const ret = obj.deleteProperty(property);
 						return { type: "boolean", value: ret };
 					} else {
-						throw new VMError(
+						throw new AssertionError(
 							"unsupported delete argument: " + expr.argument.type,
 						);
 					}
@@ -1630,7 +1647,7 @@ export class VM {
 					this.evalExpr(expr.argument);
 					return { type: "undefined" };
 				} else {
-					throw new VMError("unsupported unary op: " + expr.operator);
+					throw new AssertionError("unsupported unary op: " + expr.operator);
 				}
 			}
 
@@ -1657,7 +1674,7 @@ export class VM {
 					}
 					return left;
 				} else {
-					throw new VMError("unsupported logical op: " + expr.operator);
+					throw new AssertionError("unsupported logical op: " + expr.operator);
 				}
 			}
 
@@ -1718,7 +1735,7 @@ export class VM {
 					callThis = this.coerceToObject(callThis);
 					callee = callThis.getProperty(name);
 					if (callee === undefined) {
-						throw new VMError(
+						throw new AssertionError(
 							`can't find method ${name} in 'this'`,
 						);
 					}
@@ -1746,7 +1763,7 @@ export class VM {
 					assert(expr.callee.type !== "Super", "unsupported: super");
 					callee = this.evalExpr(expr.callee);
 					if (callee.type === "undefined" || callee.type === "null") {
-						throw new VMError("can't invoke undefined/null");
+						throw new AssertionError("can't invoke undefined/null");
 					}
 				}
 
@@ -1807,7 +1824,7 @@ export class VM {
 				else if (type === "object" && expr.value instanceof RegExp) {
 					return createRegExpFromNative(this, expr.value);
 				} else {
-					throw new VMError(
+					throw new AssertionError(
 						`unsupported literal value: ${typeof expr.value}`,
 					);
 				}
@@ -1824,7 +1841,9 @@ export class VM {
 				return this.evalExpr(expr.expressions[expr.expressions.length - 1]);
 
 			default:
-				throw new VMError(`unsupported expression node type: ${expr.type}`);
+				throw new AssertionError(
+					`unsupported expression node type: ${expr.type}`,
+				);
 		}
 	}
 
@@ -1913,7 +1932,7 @@ export class VM {
 			return { type: "boolean", value: ret };
 		}
 
-		throw new VMError("unsupported binary op: " + operator);
+		throw new AssertionError("unsupported binary op: " + operator);
 	}
 
 	evalAddition(a: JSPrimitive, b: JSPrimitive): JSValue {
@@ -2137,7 +2156,7 @@ export class VM {
 
 	isTruthy(jsv: JSValue) {
 		if (jsv.type === "object") {
-			throw new VMError("not yet implemented: isTruthy for object");
+			throw new AssertionError("not yet implemented: isTruthy for object");
 		}
 
 		if (jsv.type === "boolean") return jsv.value;
@@ -2148,7 +2167,7 @@ export class VM {
 			return jsv.value !== 0;
 		}
 
-		throw new VMError(
+		throw new AssertionError(
 			"not yet implemented: isTruthy for type: " + jsv.type,
 		);
 	}
@@ -2230,7 +2249,9 @@ export class VM {
 			const name = targetExpr.name;
 			this.setVar(name, value);
 		} else {
-			throw new VMError("unsupported assignment target: " + targetExpr.type);
+			throw new AssertionError(
+				"unsupported assignment target: " + targetExpr.type,
+			);
 		}
 
 		return value;
@@ -2242,7 +2263,7 @@ export class VM {
 	throwError(constructorName: string, message: string): never {
 		const excCons = this.globalObj.getProperty(constructorName, this);
 		if (!(excCons instanceof VMInvokable)) {
-			throw new VMError("exception constructor must be invokable");
+			throw new AssertionError("exception constructor must be invokable");
 		}
 		// avoid infinite recursion with performNew
 		if (constructorName === "TypeError") {
@@ -2345,7 +2366,7 @@ export class VM {
 			return true;
 		}
 
-		throw new VMError("invalid value type: " + right.type);
+		throw new AssertionError("invalid value type: " + right.type);
 	}
 
 	looseEqual(leftExpr: acorn.Expression, rightExpr: acorn.Expression) {
@@ -2497,7 +2518,9 @@ export class VM {
 			} else if (order === "toString first") {
 				tryCall("toString", []);
 				tryCall("valueOf", []);
-			} else throw new VMError('invalid value for arg "order": ' + order);
+			} else {throw new AssertionError(
+					'invalid value for arg "order": ' + order,
+				);}
 
 			if (prim !== undefined) return prim;
 			else {
@@ -2594,7 +2617,7 @@ export class VM {
 			// Objects are first converted to a primitive by calling its [Symbol.toPrimitive]() (with "string" as hint), toString(), and valueOf() methods, in that order. The resulting primitive is then converted to a string.
 			const prim = this.coerceToPrimitive(value, "toString first");
 			if (prim.type === "undefined") {
-				throw new VMError(
+				throw new AssertionError(
 					"VM bug: object could not be converted to string (at least Object.prototype.toString should have been called)",
 				);
 			}
@@ -2633,7 +2656,7 @@ export class VM {
 			func.setProperty("name", { type: "string", value: name });
 			this.defineVar("var", name, func);
 		} else {
-			throw new VMError(
+			throw new AssertionError(
 				"unsupported identifier for function declaration: " + decl.id,
 			);
 		}
@@ -3305,7 +3328,7 @@ function expressionToPattern(argument: acorn.Expression): acorn.Pattern {
 		argument.type === "Identifier" ||
 		argument.type === "MemberExpression"
 	) return argument;
-	throw new VMError(
+	throw new AssertionError(
 		"bug: expression can't be used as pattern, type " + argument.type,
 	);
 }

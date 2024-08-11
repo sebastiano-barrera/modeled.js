@@ -1531,7 +1531,11 @@ export class VM {
 					}
 				} else if (expr.operator === "typeof") {
 					const value = this.evalExpr(expr.argument);
-					return { type: "string", value: value.type };
+					if (value.type === "null") {
+						return { type: "string", value: "object" };
+					} else {
+						return { type: "string", value: value.type };
+					}
 				} else if (expr.operator === "!") {
 					assert(expr.prefix === true, "only supported: expr.prefix === true");
 					const value = this.coerceToBoolean(this.evalExpr(expr.argument));
@@ -1842,14 +1846,19 @@ export class VM {
 			const astr = this.coerceToString(a);
 			const bstr = this.coerceToString(b);
 			return { type: "string", value: astr + bstr };
-		} else if (a.type === "number" && b.type === "number") {
-			return { type: "number", value: a.value + b.value };
-		} else if (a.type === "bigint" && b.type === "bigint") {
-			return { type: "bigint", value: a.value + b.value };
+		}
+
+		const ap = this.coerceToNumeric(a);
+		const bp = this.coerceToNumeric(b);
+
+		if (typeof ap === "number" && typeof bp === "number") {
+			return { type: "number", value: ap + bp };
+		} else if (typeof ap === "bigint" && typeof bp === "bigint") {
+			return { type: "bigint", value: ap + bp };
 		} else {
 			return this.throwError(
 				"SyntaxError",
-				`unsupported types (${a.type}, ${b.type}) for operator +`,
+				`unsupported types (${typeof ap}, ${typeof bp}) for operator +`,
 			);
 		}
 	}
@@ -2922,7 +2931,6 @@ function createGlobalObject() {
 		value: Number.MAX_VALUE,
 	});
 
-	// writes are *silently* discarded (so, it doens't work to set writable: false)
 	consNumber.defineProperty("NaN", {
 		value: { type: "number", value: NaN },
 		configurable: false,
@@ -3143,6 +3151,13 @@ function createGlobalObject() {
 			return { type: "number", value: res };
 		}),
 	);
+	objMath.defineProperty("E", {
+		value: { type: "number", value: 2.718281828459045 },
+		configurable: false,
+		writable: false,
+		discardWriteSilently: true,
+		enumerable: false,
+	});
 
 	for (const name of G.getOwnPropertyNames()) {
 		const value = G.getOwnProperty(name);

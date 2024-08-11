@@ -124,9 +124,14 @@ async function runTest262Case(test262Root, path) {
   let runSloppy = true;
   if (metadata.flags) {
     for (const flag of metadata.flags) {
-      if (flag === 'onlyStrict') { runSloppy = false; }
-      else if (flag === 'noStrict') { runStrict = false; }
-      else { throw new SkippedTest('unknown flag: ' + flag); }
+      // deno-fmt-ignore
+      switch (flag) {
+      case 'onlyStrict': runSloppy = false; break;
+      case 'noStrict': runStrict = false; break;
+      // ignore these:
+      case 'generated': break;
+      default: throw new SkippedTest('unknown flag: ' + flag);
+      }
     }
   }
 

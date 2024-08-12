@@ -2441,7 +2441,7 @@ export class VM {
 		} else if (decl.id.type === "Identifier") {
 			const name = decl.id.name;
 			func.setProperty("name", { type: "string", value: name });
-			this.defineVar("var", name, func);
+			this.defineVar("let", name, func);
 		} else {
 			throw new AssertionError(
 				"unsupported identifier for function declaration: " + decl.id,

@@ -1273,7 +1273,15 @@ export class VM {
 						this.isTruthy(this.evalExpr(stmt.test))
 					) {
 						// keep overwriting, return the last iteration's completion value
-						completion = this.runStmt(stmt.body);
+						try {
+							completion = this.runStmt(stmt.body);
+						} catch (e) {
+							if (e.break) break;
+							else if (e.continue) {
+								// do nothing, proceed with update
+							} else throw e;
+						}
+
 						if (stmt.update !== null && stmt.update !== undefined) {
 							this.evalExpr(stmt.update);
 						}

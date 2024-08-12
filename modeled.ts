@@ -306,6 +306,20 @@ class VMArray extends VMObject {
 		if (typeof index === "number") this.arrayElements[index] = value;
 		else return super.setIndex(index, value);
 	}
+
+	*getIndexKeys(): IterableIterator<string> {
+		for (let i=0; i < this.arrayElements.length; ++i) {
+			yield String(i);
+		}
+	}
+	override *getOwnPropertyNames(): IterableIterator<PropName> {
+		yield* this.getIndexKeys();
+		yield* super.getOwnPropertyNames();
+	}
+	override *getOwnEnumerablePropertyNames(): IterableIterator<PropName> {
+		yield* this.getIndexKeys();
+		yield* super.getOwnEnumerablePropertyNames();
+	}
 }
 
 const PROTO_OBJECT = new VMObject(null);
@@ -1527,7 +1541,8 @@ export class VM {
 			}
 
 			case "ArrayExpression": {
-				const elements = expr.elements.map((elmNode) => {
+				const array = new VMArray();
+				array.arrayElements = expr.elements.map((elmNode) => {
 					assert(elmNode !== null, "unexpected null in array expression");
 					assert(
 						elmNode.type !== "SpreadElement",
@@ -1535,19 +1550,6 @@ export class VM {
 					);
 					return this.evalExpr(elmNode);
 				});
-
-				const arrayCons = this.globalObj.getProperty("Array");
-				assert(arrayCons instanceof VMInvokable, "malformed global variable");
-				const array = this.performNew(arrayCons, []);
-				const pushMethod = array.getProperty("push");
-				assert(
-					pushMethod instanceof VMInvokable,
-					"malformed Array.prototype.push method",
-				);
-				for (const elm of elements) {
-					this.performCall(pushMethod, array, [elm]);
-				}
-
 				return array;
 			}
 

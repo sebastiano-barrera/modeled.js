@@ -246,7 +246,6 @@ class VMObject {
 		}
 	}
 	defineProperty(name: PropName, descriptor: Descriptor) {
-		// TODO Propertly honor writable, configurable
 		if (!this.extensionAllowed) {
 			throw new ExceptionRequest(
 				"TypeError",
@@ -254,6 +253,12 @@ class VMObject {
 			);
 		}
 
+		if (this.descriptors.has(name)) {
+			throw new ExceptionRequest(
+				"TypeError",
+				"cannot redefine property: " + String(name),
+			);
+		}
 		this.descriptors.set(name, descriptor);
 	}
 	deleteProperty(name: PropName): boolean {

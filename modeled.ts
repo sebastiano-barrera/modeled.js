@@ -134,7 +134,7 @@ class VMObject {
 	// cases. See `resolveDescriptor`.
 	createdFromCoercion: boolean = false;
 
-	constructor(private _proto: VMObject | null = PROTO_OBJECT) {}
+	constructor(private _proto: VMObject | null = R().PROTO_OBJECT) {}
 
 	resolveDescriptor(descriptor: Descriptor, vm?: VM) {
 		if (descriptor.get !== undefined) {
@@ -158,7 +158,6 @@ class VMObject {
 				this.createdFromCoercion
 			) {
 				subject = this.primitive;
-				console.log("--- resolveDescriptor: undo object coercion => ", subject);
 			} else {
 				subject = this;
 			}
@@ -315,7 +314,7 @@ class VMArray extends VMObject {
 	arrayElements: JSValue[] = [];
 
 	constructor() {
-		super(PROTO_ARRAY);
+		super(R().PROTO_ARRAY);
 
 		super.defineProperty("length", {
 			get: nativeVMFunc((_vm, subject, _args) => {
@@ -357,15 +356,18 @@ class VMArray extends VMObject {
 	}
 }
 
-const PROTO_OBJECT = new VMObject(null);
-const PROTO_FUNCTION = new VMObject(PROTO_OBJECT);
-const PROTO_NUMBER = new VMObject();
-const PROTO_BIGINT = new VMObject();
-const PROTO_BOOLEAN = new VMObject();
-const PROTO_STRING = new VMObject();
-const PROTO_SYMBOL = new VMObject();
-const PROTO_ARRAY = new VMObject();
-const PROTO_REGEXP = new VMObject();
+class Realm {
+	PROTO_OBJECT = new VMObject(null);
+	// we can't use `new VMObject()` here, because the default argument uses R!
+	PROTO_FUNCTION = new VMObject(this.PROTO_OBJECT);
+	PROTO_NUMBER = new VMObject(this.PROTO_OBJECT);
+	PROTO_BIGINT = new VMObject(this.PROTO_OBJECT);
+	PROTO_BOOLEAN = new VMObject(this.PROTO_OBJECT);
+	PROTO_STRING = new VMObject(this.PROTO_OBJECT);
+	PROTO_SYMBOL = new VMObject(this.PROTO_OBJECT);
+	PROTO_ARRAY = new VMObject(this.PROTO_OBJECT);
+	PROTO_REGEXP = new VMObject(this.PROTO_OBJECT);
+}
 
 interface InvokeOpts {
 	isNew?: boolean;
@@ -379,7 +381,7 @@ abstract class VMInvokable extends VMObject {
 	canConstruct: boolean = false;
 
 	constructor(consPrototype?: VMObject) {
-		super(PROTO_FUNCTION);
+		super(R().PROTO_FUNCTION);
 		if (consPrototype === undefined) {
 			consPrototype = new VMObject();
 		}
@@ -444,146 +446,6 @@ abstract class VMInvokable extends VMObject {
 	}
 }
 
-PROTO_FUNCTION.setProperty(
-	"bind",
-	nativeVMFunc((vm: VM, outerInvokableValue: JSValue, args: JSValue[]) => {
-		const forcedSubject = args[0];
-		const outerInvokable = vm.coerceToObject(outerInvokableValue);
-		if (outerInvokable instanceof VMInvokable) {
-			return nativeVMFunc((vm: VM, _: JSValue, args: JSValue[]) => {
-				// force subject to be this inner subject passed here
-				return outerInvokable.invoke(vm, forcedSubject, args);
-			});
-		}
-
-		return vm.throwError(
-			"TypeError",
-			"Function.prototype.bind: 'this' is not a function",
-		);
-	}),
-);
-PROTO_FUNCTION.setProperty(
-	"call",
-	nativeVMFunc((vm: VM, subject: JSValue, args: JSValue[]) => {
-		const forcedSubject: JSValue = args.length >= 1
-			? args[0]
-			: { type: "undefined" };
-		// force subject to be this inner subject passed here
-		const outerInvokable = vm.coerceToObject(subject);
-		if (!(outerInvokable instanceof VMInvokable)) {
-			return vm.throwError(
-				"TypeError",
-				"Function.prototype.call: 'this' is not a function",
-			);
-		}
-		return outerInvokable.invoke(vm, forcedSubject, args.slice(1));
-	}),
-);
-PROTO_FUNCTION.setProperty(
-	"apply",
-	nativeVMFunc((vm, subject, args) => {
-		const forcedSubject: JSValue = args.length >= 1
-			? args[0]
-			: { type: "undefined" };
-
-		let argsArray: JSValue[] = [];
-		if (args.length >= 2) {
-			const arg = args[1];
-			if (arg instanceof VMArray) {
-				argsArray = arg.arrayElements;
-			} else {
-				return vm.throwError(
-					"TypeError",
-					"first argument must be an array (of arguments to pass)",
-				);
-			}
-		}
-
-		// force subject to be this inner subject passed here
-		const outerInvokable = vm.coerceToObject(subject);
-		if (!(outerInvokable instanceof VMInvokable)) {
-			return vm.throwError(
-				"TypeError",
-				"Function.prototype.call: 'this' is not a function",
-			);
-		}
-		return outerInvokable.invoke(vm, forcedSubject, argsArray);
-	}),
-);
-PROTO_FUNCTION.setProperty(
-	"toString",
-	nativeVMFunc((_vm, subject, _args) => {
-		assert(
-			subject instanceof VMFunction,
-			"Function.prototype.toString can only be called on a Function",
-		);
-		const value = `Function#${subject.functionID}`;
-		return { type: "string", value };
-	}),
-);
-
-PROTO_OBJECT.setProperty(
-	"toString",
-	nativeVMFunc(() => ({ type: "string", value: "[object Object]" })),
-);
-PROTO_OBJECT.setProperty(
-	"hasOwnProperty",
-	nativeVMFunc((vm, subject, args) => {
-		subject = vm.coerceToObject(subject);
-		const name = vm.coerceToString(args[0] || { type: "undefined" });
-		const ret = subject.containsOwnProperty(name);
-		return { type: "boolean", value: ret };
-	}),
-);
-PROTO_OBJECT.setProperty(
-	"isPrototypeOf",
-	nativeVMFunc((vm, subject, args) => {
-		const candidate = vm.coerceToObject(subject);
-		const obj = vm.coerceToObject(args[0] || { type: "undefined" });
-		const ret = obj.walkPrototypeChain((cur) => cur.is(candidate) || null);
-		return { type: "boolean", value: ret ?? false };
-	}),
-);
-
-PROTO_ARRAY.setProperty(
-	"push",
-	nativeVMFunc((_vm, subject, args) => {
-		assert(subject instanceof VMArray, "`this` must be an array");
-
-		if (typeof args[0] !== "undefined") {
-			subject.arrayElements.push(args[0]);
-		}
-		return { type: "undefined" };
-	}),
-);
-PROTO_ARRAY.setProperty(
-	"join",
-	nativeVMFunc((vm, subject, args) => {
-		if (!(subject instanceof VMArray)) {
-			return vm.throwTypeError(
-				"Array.prototype.join must be called on an Array",
-			);
-		}
-		assert(
-			subject instanceof VMArray,
-			"vm bug: array property but this is not array",
-		);
-
-		const sepValue = args[0] || { type: "string", value: "" };
-		if (sepValue.type !== "string") {
-			return vm.throwError(
-				"TypeError",
-				"first argument (separator) must be string",
-			);
-		}
-
-		const retStr = subject.arrayElements.map((value) => {
-			return vm.coerceToString(value);
-		}).join(sepValue.value);
-		return { type: "string", value: retStr };
-	}),
-);
-
 class VMFunction extends VMInvokable {
 	static #lastID = 0;
 
@@ -613,181 +475,16 @@ class VMFunction extends VMInvokable {
 	}
 }
 
-PROTO_STRING.setProperty(
-	"replace",
-	nativeVMFunc((vm: VM, subject: JSValue, args: JSValue[]) => {
-		assertIsObject(vm, subject);
-
-		if (subject.primitive?.type !== "string") {
-			return vm.throwTypeError(
-				"String.prototype.replace must be called on a string primitive",
-			);
-		}
-
-		const arg0: JSValue | undefined = args[0];
-		const arg1: JSValue | undefined = args[1];
-
-		if (arg0.type !== "string") {
-			return vm.throwTypeError(
-				"String.prototype.replace: first argument must be string",
-			);
-		}
-
-		let retStr;
-		if (arg1.type === "string") {
-			retStr = subject.primitive.value.replace(arg0.value, arg1.value);
-		} else if (arg1 instanceof VMInvokable) {
-			retStr = subject.primitive.value.replace(arg0.value, () => {
-				const ret = vm.performCall(arg1, { type: "undefined" }, [arg0]);
-				if (ret.type !== "string") {
-					return vm.throwTypeError(
-						"invalid return value from passed function: " + ret.type,
-					);
-				}
-				return ret.value;
-			});
-		} else {
-			return vm.throwTypeError(
-				"String.prototype.replace: invalid type for argument #2: " +
-					arg1.type,
-			);
-		}
-
-		return { type: "string", value: retStr };
-	}),
-);
-
-PROTO_STRING.setProperty(
-	"valueOf",
-	nativeVMFunc((vm: VM, subject: JSValue, _: JSValue[]) => {
-		const subjectObj = vm.coerceToObject(subject);
-		if (subjectObj.primitive?.type !== "string") {
-			return vm.throwError(
-				"TypeError",
-				"`this` is not a String (string wrapper)",
-			);
-		}
-		return subjectObj.primitive;
-	}),
-);
-PROTO_STRING.setProperty(
-	"toString",
-	nativeVMFunc((vm: VM, subject: JSValue, _: JSValue[]) => {
-		const subjectObj = vm.coerceToObject(subject);
-		if (subjectObj.primitive?.type !== "string") {
-			return vm.throwError(
-				"TypeError",
-				"`this` is not a String (string wrapper)",
-			);
-		}
-		return subjectObj.primitive;
-	}),
-);
-
-PROTO_NUMBER.setProperty(
-	"toString",
-	nativeVMFunc((vm, subject, _args) => {
-		assertIsObject(vm, subject);
-
-		if (
-			!Object.is(subject.proto, PROTO_NUMBER) ||
-			subject.primitive?.type !== "number"
-		) {
-			return vm.throwTypeError(
-				"Number.prototype.toString must be called on number",
-			);
-		}
-
-		const value = Number.prototype.toString.call(subject.primitive);
-		return { type: "string", value };
-	}),
-);
-
-function addValueOf(
-	proto: VMObject,
-	primitiveType: PrimType,
-	consName: string,
-) {
-	proto.setProperty(
-		"valueOf",
-		nativeVMFunc((vm, subject, _args) => {
-			assertIsObject(vm, subject);
-
-			if (
-				!Object.is(subject.proto, proto) ||
-				subject.primitive?.type !== primitiveType
-			) {
-				return vm.throwTypeError(
-					`${consName}.prototype.valueOf must be called on an ${consName} instance`,
-				);
-			}
-
-			return subject.primitive;
-		}),
-	);
+// Get the current realm, which is the current VM's realm.
+//
+// This function exists purely for the syntactical convenience of typing `R().PROTO_WHATEVER`
+function R(): Realm {
+	assert(_CV instanceof VM, "no VM currently executing!");
+	return _CV.realm;
 }
 
-addValueOf(PROTO_NUMBER, "number", "Number");
-addValueOf(PROTO_STRING, "string", "String");
-addValueOf(PROTO_BOOLEAN, "boolean", "Boolean");
-addValueOf(PROTO_SYMBOL, "symbol", "Symbol");
-addValueOf(PROTO_BIGINT, "bigint", "BigInt");
-
-PROTO_REGEXP.setProperty(
-	"test",
-	nativeVMFunc((vm, subject, args) => {
-		assertIsVMRegExp(vm, subject);
-
-		const arg = args[0];
-		if (arg.type !== "string") {
-			return vm.throwTypeError("RegExp.test argument must be string");
-		}
-
-		const ret = subject.innerRE.test(arg.value);
-		return { type: "boolean", value: ret };
-	}),
-);
-PROTO_REGEXP.setProperty(
-	"exec",
-	nativeVMFunc((vm, subject, args) => {
-		assertIsVMRegExp(vm, subject);
-
-		if (args.length === 0 || args[0].type !== "string") {
-			return vm.throwTypeError(
-				"RegExp.prototype.exec must be called with a single string as argument",
-			);
-		}
-
-		const str = args[0].value;
-		assert(typeof str === "string", "first argument must be string");
-
-		const nativeRet = subject.innerRE.exec(str);
-		if (nativeRet === null) {
-			return { type: "null" };
-		}
-
-		const ret = new VMArray();
-		for (const item of nativeRet) {
-			ret.arrayElements.push({ type: "string", value: item });
-		}
-		ret.setProperty("index", { type: "number", value: nativeRet.index });
-		ret.setProperty("input", { type: "string", value: nativeRet.input });
-
-		if (typeof nativeRet.groups === "object") {
-			const groups = new VMObject();
-			groups.proto = null;
-			for (const groupName in nativeRet.groups) {
-				const value = nativeRet.groups[groupName];
-				groups.setProperty(groupName, { type: "string", value });
-			}
-
-			ret.setProperty("groups", groups);
-		}
-
-		// TODO property `indices`
-		return ret;
-	}),
-);
+// The currently running VM
+let _CV: VM | undefined;
 
 abstract class Scope {
 	isNew = false;
@@ -983,9 +680,23 @@ class EnvScope extends Scope {
 const textOfSource = new Map<string, string>();
 
 export class VM {
-	globalObj = createGlobalObject();
+	globalObj: VMObject;
 	currentScope: Scope | null = null;
 	synCtx: acorn.Node[] = [];
+
+	readonly realm = new Realm();
+
+	constructor() {
+		try {
+			assert(_CV === undefined, "nested VM execution!");
+			_CV = this;
+
+			this.globalObj = createGlobalObject();
+			initBuiltins(this.realm);
+		} finally {
+			_CV = undefined;
+		}
+	}
 
 	//
 	// VM state (variables, stack, heap, ...)
@@ -1074,7 +785,13 @@ export class VM {
 			locations: true,
 		});
 
-		return this.runProgram(ast);
+		try {
+			assert(_CV === undefined, "nested VM execution!");
+			_CV = this;
+			return this.runProgram(ast);
+		} finally {
+			_CV = undefined;
+		}
 	}
 
 	runProgram(node: acorn.Program) {
@@ -1801,12 +1518,9 @@ export class VM {
 					} else {
 						const name = expr.callee.property.name;
 						callee = callThisObj.getProperty(name);
-					}
-
-					if (callee === undefined) {
-						throw new AssertionError(
-							`can't find method ${name} in 'this'`,
-						);
+						if (callee === undefined) {
+							callee = { type: "undefined" };
+						}
 					}
 				} else if (
 					expr.callee.type === "Identifier" && expr.callee.name === "eval"
@@ -1837,7 +1551,10 @@ export class VM {
 				}
 
 				if (!(callee instanceof VMInvokable)) {
-					return this.throwError("TypeError", "callee must be callable");
+					return this.throwError(
+						"TypeError",
+						"callee must be callable, not " + callee.type,
+					);
 				}
 				return this.performCall(callee, callThis, args);
 			}
@@ -2348,7 +2065,7 @@ export class VM {
 
 		// weird stupid case. why is BigInt not a constructor?
 		if (value.type === "bigint") {
-			const obj = new VMObject(PROTO_BIGINT);
+			const obj = new VMObject(R().PROTO_BIGINT);
 			obj.primitive = value;
 			return obj;
 		}
@@ -2791,7 +2508,7 @@ function assertIsVMRegExp(vm: VM, obj: JSValue): asserts obj is VMRegExp {
 }
 
 function createRegExpFromNative(vm: VM, innerRE: RegExp): VMRegExp {
-	const obj = new VMObject(PROTO_REGEXP);
+	const obj = new VMObject(R().PROTO_REGEXP);
 	obj.innerRE = innerRE;
 	obj.setProperty("source", { type: "string", value: innerRE.source });
 	assertIsVMRegExp(vm, obj);
@@ -2813,6 +2530,324 @@ function createRegExpFromNative(vm: VM, innerRE: RegExp): VMRegExp {
 	});
 
 	return obj;
+}
+
+function initBuiltins(realm: Realm) {
+	realm.PROTO_FUNCTION.setProperty(
+		"bind",
+		nativeVMFunc((vm: VM, outerInvokableValue: JSValue, args: JSValue[]) => {
+			const forcedSubject = args[0];
+			const outerInvokable = vm.coerceToObject(outerInvokableValue);
+			if (outerInvokable instanceof VMInvokable) {
+				return nativeVMFunc((vm: VM, _: JSValue, args: JSValue[]) => {
+					// force subject to be this inner subject passed here
+					return outerInvokable.invoke(vm, forcedSubject, args);
+				});
+			}
+
+			return vm.throwError(
+				"TypeError",
+				"Function.prototype.bind: 'this' is not a function",
+			);
+		}),
+	);
+	realm.PROTO_FUNCTION.setProperty(
+		"call",
+		nativeVMFunc((vm: VM, subject: JSValue, args: JSValue[]) => {
+			const forcedSubject: JSValue = args.length >= 1
+				? args[0]
+				: { type: "undefined" };
+			// force subject to be this inner subject passed here
+			const outerInvokable = vm.coerceToObject(subject);
+			if (!(outerInvokable instanceof VMInvokable)) {
+				return vm.throwError(
+					"TypeError",
+					"Function.prototype.call: 'this' is not a function",
+				);
+			}
+			return outerInvokable.invoke(vm, forcedSubject, args.slice(1));
+		}),
+	);
+	realm.PROTO_FUNCTION.setProperty(
+		"apply",
+		nativeVMFunc((vm, subject, args) => {
+			const forcedSubject: JSValue = args.length >= 1
+				? args[0]
+				: { type: "undefined" };
+
+			let argsArray: JSValue[] = [];
+			if (args.length >= 2) {
+				const arg = args[1];
+				if (arg instanceof VMArray) {
+					argsArray = arg.arrayElements;
+				} else {
+					return vm.throwError(
+						"TypeError",
+						"first argument must be an array (of arguments to pass)",
+					);
+				}
+			}
+
+			// force subject to be this inner subject passed here
+			const outerInvokable = vm.coerceToObject(subject);
+			if (!(outerInvokable instanceof VMInvokable)) {
+				return vm.throwError(
+					"TypeError",
+					"Function.prototype.call: 'this' is not a function",
+				);
+			}
+			return outerInvokable.invoke(vm, forcedSubject, argsArray);
+		}),
+	);
+	realm.PROTO_FUNCTION.setProperty(
+		"toString",
+		nativeVMFunc((_vm, subject, _args) => {
+			assert(
+				subject instanceof VMFunction,
+				"Function.prototype.toString can only be called on a Function",
+			);
+			const value = `Function#${subject.functionID}`;
+			return { type: "string", value };
+		}),
+	);
+
+	realm.PROTO_OBJECT.setProperty(
+		"toString",
+		nativeVMFunc(() => ({ type: "string", value: "[object Object]" })),
+	);
+	realm.PROTO_OBJECT.setProperty(
+		"hasOwnProperty",
+		nativeVMFunc((vm, subject, args) => {
+			subject = vm.coerceToObject(subject);
+			const name = vm.coerceToString(args[0] || { type: "undefined" });
+			const ret = subject.containsOwnProperty(name);
+			return { type: "boolean", value: ret };
+		}),
+	);
+	realm.PROTO_OBJECT.setProperty(
+		"isPrototypeOf",
+		nativeVMFunc((vm, subject, args) => {
+			const candidate = vm.coerceToObject(subject);
+			const obj = vm.coerceToObject(args[0] || { type: "undefined" });
+			const ret = obj.walkPrototypeChain((cur) => cur.is(candidate) || null);
+			return { type: "boolean", value: ret ?? false };
+		}),
+	);
+
+	realm.PROTO_ARRAY.setProperty(
+		"push",
+		nativeVMFunc((_vm, subject, args) => {
+			assert(subject instanceof VMArray, "`this` must be an array");
+
+			if (typeof args[0] !== "undefined") {
+				subject.arrayElements.push(args[0]);
+			}
+			return { type: "undefined" };
+		}),
+	);
+	realm.PROTO_ARRAY.setProperty(
+		"join",
+		nativeVMFunc((vm, subject, args) => {
+			if (!(subject instanceof VMArray)) {
+				return vm.throwTypeError(
+					"Array.prototype.join must be called on an Array",
+				);
+			}
+			assert(
+				subject instanceof VMArray,
+				"vm bug: array property but this is not array",
+			);
+
+			const sepValue = args[0] || { type: "string", value: "" };
+			if (sepValue.type !== "string") {
+				return vm.throwError(
+					"TypeError",
+					"first argument (separator) must be string",
+				);
+			}
+
+			const retStr = subject.arrayElements.map((value) => {
+				return vm.coerceToString(value);
+			}).join(sepValue.value);
+			return { type: "string", value: retStr };
+		}),
+	);
+
+	realm.PROTO_STRING.setProperty(
+		"replace",
+		nativeVMFunc((vm: VM, subject: JSValue, args: JSValue[]) => {
+			assertIsObject(vm, subject);
+
+			if (subject.primitive?.type !== "string") {
+				return vm.throwTypeError(
+					"String.prototype.replace must be called on a string primitive",
+				);
+			}
+
+			const arg0: JSValue | undefined = args[0];
+			const arg1: JSValue | undefined = args[1];
+
+			if (arg0.type !== "string") {
+				return vm.throwTypeError(
+					"String.prototype.replace: first argument must be string",
+				);
+			}
+
+			let retStr;
+			if (arg1.type === "string") {
+				retStr = subject.primitive.value.replace(arg0.value, arg1.value);
+			} else if (arg1 instanceof VMInvokable) {
+				retStr = subject.primitive.value.replace(arg0.value, () => {
+					const ret = vm.performCall(arg1, { type: "undefined" }, [arg0]);
+					if (ret.type !== "string") {
+						return vm.throwTypeError(
+							"invalid return value from passed function: " + ret.type,
+						);
+					}
+					return ret.value;
+				});
+			} else {
+				return vm.throwTypeError(
+					"String.prototype.replace: invalid type for argument #2: " +
+						arg1.type,
+				);
+			}
+
+			return { type: "string", value: retStr };
+		}),
+	);
+
+	realm.PROTO_STRING.setProperty(
+		"valueOf",
+		nativeVMFunc((vm: VM, subject: JSValue, _: JSValue[]) => {
+			const subjectObj = vm.coerceToObject(subject);
+			if (subjectObj.primitive?.type !== "string") {
+				return vm.throwError(
+					"TypeError",
+					"`this` is not a String (string wrapper)",
+				);
+			}
+			return subjectObj.primitive;
+		}),
+	);
+	realm.PROTO_STRING.setProperty(
+		"toString",
+		nativeVMFunc((vm: VM, subject: JSValue, _: JSValue[]) => {
+			const subjectObj = vm.coerceToObject(subject);
+			if (subjectObj.primitive?.type !== "string") {
+				return vm.throwError(
+					"TypeError",
+					"`this` is not a String (string wrapper)",
+				);
+			}
+			return subjectObj.primitive;
+		}),
+	);
+
+	realm.PROTO_NUMBER.setProperty(
+		"toString",
+		nativeVMFunc((vm, subject, _args) => {
+			assertIsObject(vm, subject);
+
+			if (
+				!Object.is(subject.proto, realm.PROTO_NUMBER) ||
+				subject.primitive?.type !== "number"
+			) {
+				return vm.throwTypeError(
+					"Number.prototype.toString must be called on number",
+				);
+			}
+
+			const value = Number.prototype.toString.call(subject.primitive);
+			return { type: "string", value };
+		}),
+	);
+
+	function addValueOf(
+		proto: VMObject,
+		primitiveType: PrimType,
+		consName: string,
+	) {
+		proto.setProperty(
+			"valueOf",
+			nativeVMFunc((vm, subject, _args) => {
+				assertIsObject(vm, subject);
+
+				if (
+					!Object.is(subject.proto, proto) ||
+					subject.primitive?.type !== primitiveType
+				) {
+					return vm.throwTypeError(
+						`${consName}.prototype.valueOf must be called on an ${consName} instance`,
+					);
+				}
+
+				return subject.primitive;
+			}),
+		);
+	}
+
+	addValueOf(realm.PROTO_NUMBER, "number", "Number");
+	addValueOf(realm.PROTO_STRING, "string", "String");
+	addValueOf(realm.PROTO_BOOLEAN, "boolean", "Boolean");
+	addValueOf(realm.PROTO_SYMBOL, "symbol", "Symbol");
+	addValueOf(realm.PROTO_BIGINT, "bigint", "BigInt");
+
+	realm.PROTO_REGEXP.setProperty(
+		"test",
+		nativeVMFunc((vm, subject, args) => {
+			assertIsVMRegExp(vm, subject);
+
+			const arg = args[0];
+			if (arg.type !== "string") {
+				return vm.throwTypeError("RegExp.test argument must be string");
+			}
+
+			const ret = subject.innerRE.test(arg.value);
+			return { type: "boolean", value: ret };
+		}),
+	);
+	realm.PROTO_REGEXP.setProperty(
+		"exec",
+		nativeVMFunc((vm, subject, args) => {
+			assertIsVMRegExp(vm, subject);
+
+			if (args.length === 0 || args[0].type !== "string") {
+				return vm.throwTypeError(
+					"RegExp.prototype.exec must be called with a single string as argument",
+				);
+			}
+
+			const str = args[0].value;
+			assert(typeof str === "string", "first argument must be string");
+
+			const nativeRet = subject.innerRE.exec(str);
+			if (nativeRet === null) {
+				return { type: "null" };
+			}
+
+			const ret = new VMArray();
+			for (const item of nativeRet) {
+				ret.arrayElements.push({ type: "string", value: item });
+			}
+			ret.setProperty("index", { type: "number", value: nativeRet.index });
+			ret.setProperty("input", { type: "string", value: nativeRet.input });
+
+			if (typeof nativeRet.groups === "object") {
+				const groups = new VMObject();
+				groups.proto = null;
+				for (const groupName in nativeRet.groups) {
+					const value = nativeRet.groups[groupName];
+					groups.setProperty(groupName, { type: "string", value });
+				}
+
+				ret.setProperty("groups", groups);
+			}
+
+			// TODO property `indices`
+			return ret;
+		}),
+	);
 }
 
 function createGlobalObject() {
@@ -2885,7 +2920,7 @@ function createGlobalObject() {
 
 		return vm.coerceToObject(arg);
 	}, { isConstructor: true });
-	consObject.setProperty("prototype", PROTO_OBJECT);
+	consObject.setProperty("prototype", R().PROTO_OBJECT);
 	consObject.setProperty(
 		"defineProperty",
 		nativeVMFunc((vm: VM, _: JSValue, args: JSValue[]): JSValue => {
@@ -3096,14 +3131,14 @@ function createGlobalObject() {
 
 	addPrimitiveWrapperConstructor(
 		"Boolean",
-		PROTO_BOOLEAN,
+		R().PROTO_BOOLEAN,
 		"boolean",
 		(vm, x) => ({ type: "boolean", value: vm.coerceToBoolean(x) }),
 	);
 
 	const consNumber = addPrimitiveWrapperConstructor(
 		"Number",
-		PROTO_NUMBER,
+		R().PROTO_NUMBER,
 		"number",
 		(vm, x) => ({
 			type: "number",
@@ -3162,7 +3197,7 @@ function createGlobalObject() {
 
 	const consString = addPrimitiveWrapperConstructor(
 		"String",
-		PROTO_STRING,
+		R().PROTO_STRING,
 		"string",
 		(vm, x) => ({
 			type: "string",
@@ -3196,7 +3231,7 @@ function createGlobalObject() {
 
 	const consSymbol = addPrimitiveWrapperConstructor(
 		"Symbol",
-		PROTO_SYMBOL,
+		R().PROTO_SYMBOL,
 		"symbol",
 		(vm, x) => ({ type: "symbol", value: vm.coerceToSymbol(x) }),
 	);
@@ -3226,7 +3261,7 @@ function createGlobalObject() {
 			value: subject instanceof VMArray,
 		})),
 	);
-	consArray.setProperty("prototype", PROTO_ARRAY);
+	consArray.setProperty("prototype", R().PROTO_ARRAY);
 
 	const consFunction = nativeVMFunc((vm, _subject, args) => {
 		// even when invoked as `new Function(...)`, discard this, return another object
@@ -3262,7 +3297,7 @@ function createGlobalObject() {
 		return vm.makeFunction([], blockStmt, { scopeStrictnessIrrelevant: true });
 	}, { isConstructor: true });
 	G.setProperty("Function", consFunction);
-	consFunction.setProperty("prototype", PROTO_FUNCTION);
+	consFunction.setProperty("prototype", R().PROTO_FUNCTION);
 
 	const consRegExp = nativeVMFunc((vm, _subject, args) => {
 		const arg = args[0];
@@ -3272,7 +3307,7 @@ function createGlobalObject() {
 		return createRegExpFromNative(vm, new RegExp(arg.value));
 	}, { isConstructor: true });
 	G.setProperty("RegExp", consRegExp);
-	consRegExp.setProperty("prototype", PROTO_REGEXP);
+	consRegExp.setProperty("prototype", R().PROTO_REGEXP);
 
 	G.setProperty(
 		"eval",

@@ -32,7 +32,7 @@ if (args.single) {
   console.log(" --- single test case " + args.single);
   const outcomes = await runTest262Case(test262Root, args.single);
   for (const outcome of outcomes) {
-    console.log(`outcome\t${outcome.outcome}`)
+    console.log(`outcome\t${outcome.mode}\t${outcome.outcome}`)
     if (outcome.outcome === 'failure') {
       console.log(`\terror\t${outcome.error}`)
 
@@ -169,6 +169,7 @@ async function runTest262Case(test262Root, path) {
       }
     }
      
+    outcome.mode = strict ? 'strict' : 'sloppy';
     return outcome;
   }
 

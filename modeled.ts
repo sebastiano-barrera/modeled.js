@@ -122,17 +122,47 @@ class VMObject {
 	readonly type: "object" | "function" = "object";
 	descriptors: Map<PropName, Descriptor> = new Map();
 
-	primitive?: boolean | string | number | bigint | symbol;
+	primitive?: JSPrimitive;
+	// TODO? fold innerRE into primitive
 	innerRE?: RegExp;
 
 	extensionAllowed: boolean = true;
+	// True iff this is a primitive wrapper created "on the fly" (while calling a
+	// method on a primitive, e.g. `(5).doSomething()`).
+	//
+	// This matters when "undoing" object coercion in non-strict mode, in some
+	// cases. See `resolveDescriptor`.
+	createdFromCoercion: boolean = false;
 
 	constructor(private _proto: VMObject | null = PROTO_OBJECT) {}
 
 	resolveDescriptor(descriptor: Descriptor, vm?: VM) {
 		if (descriptor.get !== undefined) {
 			assert(vm instanceof VM, "looking up described value but vm not passed");
-			return vm.performCall(descriptor.get, this, []);
+
+			// in a literal call to the getter (`obj.getter()`), after the `obj.getter`
+			// lookup, the CallExpression handler would decide whether to coerce `this` to
+			// object or not.
+			//
+			// here, instead, object coercion may already have happened, so we may have to
+			// "undo" it.
+
+			assert(
+				vm.currentScope !== null,
+				"VMObject.resolveDescriptor: scope !== null",
+			);
+			let subject: JSValue;
+			if (
+				vm.currentScope.isStrict() &&
+				this.primitive !== undefined &&
+				this.createdFromCoercion
+			) {
+				subject = this.primitive;
+				console.log("--- resolveDescriptor: undo object coercion => ", subject);
+			} else {
+				subject = this;
+			}
+			return vm.performCall(descriptor.get, subject, []);
 		}
 		assert(
 			descriptor.value !== undefined,
@@ -583,7 +613,7 @@ PROTO_STRING.setProperty(
 	nativeVMFunc((vm: VM, subject: JSValue, args: JSValue[]) => {
 		assertIsObject(vm, subject);
 
-		if (typeof subject.primitive !== "string") {
+		if (subject.primitive?.type !== "string") {
 			return vm.throwTypeError(
 				"String.prototype.replace must be called on a string primitive",
 			);
@@ -600,13 +630,9 @@ PROTO_STRING.setProperty(
 
 		let retStr;
 		if (arg1.type === "string") {
-			assert(
-				typeof subject.primitive === "string",
-				"second argument is string; must be called on string",
-			);
-			retStr = subject.primitive.replace(arg0.value, arg1.value);
+			retStr = subject.primitive.value.replace(arg0.value, arg1.value);
 		} else if (arg1 instanceof VMInvokable) {
-			retStr = subject.primitive.replace(arg0.value, () => {
+			retStr = subject.primitive.value.replace(arg0.value, () => {
 				const ret = vm.performCall(arg1, { type: "undefined" }, [arg0]);
 				if (ret.type !== "string") {
 					return vm.throwTypeError(
@@ -630,26 +656,26 @@ PROTO_STRING.setProperty(
 	"valueOf",
 	nativeVMFunc((vm: VM, subject: JSValue, _: JSValue[]) => {
 		const subjectObj = vm.coerceToObject(subject);
-		if (typeof subjectObj.primitive !== "string") {
+		if (subjectObj.primitive?.type !== "string") {
 			return vm.throwError(
 				"TypeError",
 				"`this` is not a String (string wrapper)",
 			);
 		}
-		return { type: "string", value: subjectObj.primitive };
+		return subjectObj.primitive;
 	}),
 );
 PROTO_STRING.setProperty(
 	"toString",
 	nativeVMFunc((vm: VM, subject: JSValue, _: JSValue[]) => {
 		const subjectObj = vm.coerceToObject(subject);
-		if (typeof subjectObj.primitive !== "string") {
+		if (subjectObj.primitive?.type !== "string") {
 			return vm.throwError(
 				"TypeError",
 				"`this` is not a String (string wrapper)",
 			);
 		}
-		return { type: "string", value: subjectObj.primitive };
+		return subjectObj.primitive;
 	}),
 );
 
@@ -660,7 +686,7 @@ PROTO_NUMBER.setProperty(
 
 		if (
 			!Object.is(subject.proto, PROTO_NUMBER) ||
-			typeof subject.primitive !== "number"
+			subject.primitive?.type !== "number"
 		) {
 			return vm.throwTypeError(
 				"Number.prototype.toString must be called on number",
@@ -684,16 +710,14 @@ function addValueOf(
 
 			if (
 				!Object.is(subject.proto, proto) ||
-				typeof subject.primitive !== primitiveType
+				subject.primitive?.type !== primitiveType
 			) {
 				return vm.throwTypeError(
 					`${consName}.prototype.valueOf must be called on an ${consName} instance`,
 				);
 			}
 
-			const ret = { type: primitiveType, value: subject.primitive };
-			assertIsValue(ret);
-			return ret;
+			return subject.primitive;
 		}),
 	);
 }
@@ -2320,7 +2344,7 @@ export class VM {
 		// weird stupid case. why is BigInt not a constructor?
 		if (value.type === "bigint") {
 			const obj = new VMObject(PROTO_BIGINT);
-			obj.primitive = value.value;
+			obj.primitive = value;
 			return obj;
 		}
 
@@ -2349,6 +2373,7 @@ export class VM {
 			"bug: primitive wrapper constructor must be invokable",
 		);
 		const obj = this.performNew(cons, [value]);
+		obj.createdFromCoercion = true;
 		assert(obj instanceof VMObject, "bug: new must return object");
 		return obj;
 	}
@@ -3038,7 +3063,7 @@ function createGlobalObject() {
 		name: string,
 		prototype: VMObject,
 		primType: PrimType,
-		coercer: (vm: VM, value: JSValue) => VMObject["primitive"],
+		coercer: (vm: VM, value: JSValue) => JSPrimitive,
 		postInit?: (vm: VM, obj: VMObject) => void,
 	) {
 		const cons = nativeVMFunc((vm, subject, args, options): JSValue => {
@@ -3068,14 +3093,17 @@ function createGlobalObject() {
 		"Boolean",
 		PROTO_BOOLEAN,
 		"boolean",
-		(vm, x) => vm.coerceToBoolean(x),
+		(vm, x) => ({ type: "boolean", value: vm.coerceToBoolean(x) }),
 	);
 
 	const consNumber = addPrimitiveWrapperConstructor(
 		"Number",
 		PROTO_NUMBER,
 		"number",
-		(vm, x) => x.type === "undefined" ? 0 : vm.coerceToNumber(x),
+		(vm, x) => ({
+			type: "number",
+			value: x.type === "undefined" ? 0 : vm.coerceToNumber(x),
+		}),
 	);
 	consNumber.setProperty("POSITIVE_INFINITY", {
 		type: "number",
@@ -3131,12 +3159,15 @@ function createGlobalObject() {
 		"String",
 		PROTO_STRING,
 		"string",
-		(vm, x) => x.type === "undefined" ? "" : vm.coerceToString(x),
+		(vm, x) => ({
+			type: "string",
+			value: x.type === "undefined" ? "" : vm.coerceToString(x),
+		}),
 		(_, obj) => {
-			assert(typeof obj.primitive === "string", "postinit string");
+			assert(obj.primitive?.type === "string", "postinit string");
 			obj.setProperty("length", {
 				type: "number",
-				value: obj.primitive.length,
+				value: obj.primitive.value.length,
 			});
 		},
 	);
@@ -3162,7 +3193,7 @@ function createGlobalObject() {
 		"Symbol",
 		PROTO_SYMBOL,
 		"symbol",
-		(vm, x) => vm.coerceToSymbol(x),
+		(vm, x) => ({ type: "symbol", value: vm.coerceToSymbol(x) }),
 	);
 	// we import some well-known symbols from the host JS
 	// TODO stop doing this; define our own Symbol representation and our own well-defined symbols

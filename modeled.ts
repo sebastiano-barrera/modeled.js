@@ -413,6 +413,7 @@ abstract class VMInvokable extends VMObject {
 			assert(vm.currentScope !== null, "no parent scope!");
 
 			vm.currentScope.isNew = isNew;
+			assert(subject !== undefined, "!");
 			vm.currentScope.this = subject;
 			assert(
 				this.isStrict || subject instanceof VMObject,
@@ -2536,7 +2537,7 @@ function initBuiltins(realm: Realm) {
 	realm.PROTO_FUNCTION.setProperty(
 		"bind",
 		nativeVMFunc((vm: VM, outerInvokableValue: JSValue, args: JSValue[]) => {
-			const forcedSubject = args[0];
+			const forcedSubject = args[0] || { type: "undefined" };
 			const outerInvokable = vm.coerceToObject(outerInvokableValue);
 			if (outerInvokable instanceof VMInvokable) {
 				return nativeVMFunc((vm: VM, _: JSValue, args: JSValue[]) => {

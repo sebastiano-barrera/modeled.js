@@ -1,4 +1,5 @@
 - scoping rules (declaration hoisting, etc.)
+- function captures (don't these work already?)
 - "holey" arrays (empty, rather than undefined, elements)
 - patterns as assignment targets
 

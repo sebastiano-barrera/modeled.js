@@ -1758,13 +1758,20 @@ export class VM {
 					);
 
 					callThis = this.evalExpr(expr.callee.object);
-					callThis = this.coerceToObject(callThis);
+					// in strict mode, this is *only* used for the purpose of looking up methods in primitives.
+					// callThis may remain a primitive.
+					const callThisObj = this.coerceToObject(callThis);
+
+					// in sloppy mode, `this` is always an object
+					if (!this.currentScope.isStrict()) {
+						callThis = callThisObj;
+					}
 
 					if (expr.callee.computed) {
 						callee = this.evalExpr(expr.callee);
 					} else {
 						const name = expr.callee.property.name;
-						callee = callThis.getProperty(name);
+						callee = callThisObj.getProperty(name);
 					}
 
 					if (callee === undefined) {

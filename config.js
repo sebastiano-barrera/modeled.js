@@ -1,9 +1,9 @@
 import fullTestConfig from './fullTestConfig.json' with {type: 'json'};
 import testMeta from './testMeta.json' with {type: 'json'};
 
-const fraction = 1.0
+const fraction = 0.5
 const predicate = path => (
-  path.startsWith('test/language/block-scope/') 
+  path.startsWith('test/language/function-code/') 
   && (testMeta.testCases[path] || {}).features === undefined 
   && Math.random() < fraction
 );

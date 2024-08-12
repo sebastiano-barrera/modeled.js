@@ -308,7 +308,7 @@ class VMArray extends VMObject {
 	}
 
 	*getIndexKeys(): IterableIterator<string> {
-		for (let i=0; i < this.arrayElements.length; ++i) {
+		for (let i = 0; i < this.arrayElements.length; ++i) {
 			yield String(i);
 		}
 	}
@@ -1749,23 +1749,24 @@ export class VM {
 					expr.callee.property.type === "Identifier"
 				) {
 					assert(
-						!expr.callee.computed,
-						"only supported: member call with !computed",
-					);
-					assert(
 						!expr.callee.optional,
 						"only supported: member call with !optional",
 					);
-
-					const name = expr.callee.property.name;
-
 					assert(
 						expr.callee.object.type !== "Super",
 						"unsupported: super.property",
 					);
+
 					callThis = this.evalExpr(expr.callee.object);
 					callThis = this.coerceToObject(callThis);
-					callee = callThis.getProperty(name);
+
+					if (expr.callee.computed) {
+						callee = this.evalExpr(expr.callee);
+					} else {
+						const name = expr.callee.property.name;
+						callee = callThis.getProperty(name);
+					}
+
 					if (callee === undefined) {
 						throw new AssertionError(
 							`can't find method ${name} in 'this'`,

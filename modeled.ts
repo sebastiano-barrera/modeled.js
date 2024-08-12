@@ -1552,7 +1552,7 @@ export class VM {
 							[propertyNode.kind]: func,
 							configurable: false,
 							enumerable: false,
-							writable: false,
+							writable: (propertyNode.kind === "set"),
 						});
 					} else {
 						throw new AssertionError(

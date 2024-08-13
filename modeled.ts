@@ -56,6 +56,35 @@ type PrimType = JSValue["type"];
 
 interface Node extends acorn.Node {
 	sourceFile?: string;
+
+	/**
+	 * Name bindings (variable declarations) visible in this node (and children).
+	 *
+	 * This list is initially empty (and it should be considered as such if this
+	 * field is absent). It's populated by `hoistDeclarations`. After the bindings
+	 * are processed, the only way to bind another name  during the course of this
+	 * node's execution is with a FunctionExpression.
+	 */
+	bindings?: Map<string, Binding>;
+
+	/**
+	 * Function declarations.
+	 *
+	 * They're collected here so that they can be processed AFTER (hoisted) variable
+	 * declarations, but BEFORE any statements. While processing the rest of the
+	 * block's children statements, FunctionDeclarations are skipped.
+	 *
+	 * Different elements may result in multiple assignments to the same variable.
+	 * In this case, only the last one matters (as in regular imperative programming),
+	 * so order matters.
+	 */
+	functionDecls?: acorn.FunctionDeclaration[];
+}
+
+interface Binding {
+	// this has no effect on hoisting, on the contrary, it is *produced* by
+	// hoistDeclarations.  It's just still needed for a few minor details.
+	kind: "let" | "var";
 }
 
 // Throw an ExceptionRequest instance when a JavaScript exception should be
@@ -547,17 +576,25 @@ abstract class Scope {
 		valueOrThunk: JSValue | (() => JSValue),
 	): void;
 	abstract setVar(name: string, value: JSValue, vm?: VM): void;
-	abstract lookupVar(name: string): JSValue | undefined;
+	abstract lookupVar(
+		name: string,
+		options?: LookupOptions,
+	): JSValue | undefined;
 	abstract deleteVar(name: string): boolean;
 	abstract setDoNotDelete(name: string): void;
 }
 
-type DeclKind = "var" | "let" | "const";
+interface LookupOptions {
+	/** Do not extend lookup to parent scopes */
+	noParent?: boolean;
+}
+
+type DeclKind = "var" | "let" | "const" | "function";
 
 function assertValidDeclKind(kind: string): asserts kind is DeclKind {
 	assert(
-		kind === "var" || kind === "let" || kind === "const",
-		"`kind` must be one of 'var', 'let', or 'const'",
+		kind === "var" || kind === "let" || kind === "const" || kind === "function",
+		"`kind` must be one of: var, let, const, function",
 	);
 }
 
@@ -578,17 +615,7 @@ class VarScope extends Scope {
 		valueOrThunk: JSValue | (() => JSValue),
 	) {
 		assertValidDeclKind(kind);
-
-		// var decls bubble up to the top of the function's body
-		if (kind === "var" && !this.isCallWrapper && this.parent !== null) {
-			return this.parent.defineVar(kind, name, valueOrThunk);
-		}
-
-		if (this.vars.has(name)) {
-			// redefinition, discard
-			return;
-		}
-
+		assert(!this.vars.has(name), "hoist bug: double defineVar for " + name);
 		this.vars.set(name, valueOrThunk);
 	}
 
@@ -604,13 +631,17 @@ class VarScope extends Scope {
 		}
 	}
 
-	lookupVar(name: string): JSValue | undefined {
+	override lookupVar(
+		name: string,
+		options?: LookupOptions,
+	): JSValue | undefined {
 		let value = this.vars.get(name);
 		if (typeof value === "function") {
 			value = value();
 		}
 		if (typeof value !== "undefined") return value;
-		if (this.parent) return this.parent.lookupVar(name);
+		const noParent = options?.noParent ?? false;
+		if (!noParent && this.parent) return this.parent.lookupVar(name);
 		return undefined;
 	}
 
@@ -633,16 +664,14 @@ class EnvScope extends Scope {
 	}
 
 	defineVar(kind: DeclKind, name: string, value: JSValue): void {
-		assert(
-			kind === "var" || kind === "let" || kind === "const",
-			"`kind` must be one of 'var', 'let', or 'const'",
-		);
-		this.env.defineProperty(name, {
-			value,
-			configurable: false,
-			enumerable: true,
-			writable: true,
-		});
+		if (kind === "var" || kind === "function") {
+			this.env.defineProperty(name, {
+				value,
+				configurable: false,
+				enumerable: true,
+				writable: true,
+			});
+		}
 	}
 	setVar(name: string, value: JSValue, vm?: VM): void {
 		assert(
@@ -683,7 +712,7 @@ const textOfSource = new Map<string, string>();
 export class VM {
 	globalObj: VMObject;
 	currentScope: Scope | null = null;
-	synCtx: acorn.Node[] = [];
+	synCtx: Node[] = [];
 
 	readonly realm = new Realm();
 
@@ -719,9 +748,9 @@ export class VM {
 		assert(this.currentScope !== null, "there must be a scope");
 		return this.currentScope.deleteVar(name);
 	}
-	lookupVar(name: string) {
+	lookupVar(name: string, options?: LookupOptions) {
 		assert(this.currentScope !== null, "there must be a scope");
-		return this.currentScope.lookupVar(name);
+		return this.currentScope.lookupVar(name, options);
 	}
 	setDoNotDelete(name: string) {
 		assert(this.currentScope !== null, "there must be a scope");
@@ -840,6 +869,8 @@ export class VM {
 				}
 
 				throw error;
+			} finally {
+				this.currentScope = null;
 			}
 		});
 	}
@@ -876,7 +907,7 @@ export class VM {
 		let completion: JSValue = { type: "undefined" };
 		for (const stmt of body) {
 			// last iteration's CV becomes block's CV
-			completion = this.runStmt(stmt);
+			completion = this.runStmt(stmt) ?? completion;
 		}
 		return completion;
 	}
@@ -889,10 +920,29 @@ export class VM {
 		return callee.invoke(this, subject, args);
 	}
 
-	runStmt(node: acorn.Node): JSValue {
+	/**
+	 * Run the given statement node and returns its completion value.
+	 *
+	 * Returns undefined if the statement has no completion value.
+	 */
+	runStmt(node: Node): JSValue | undefined {
 		return this.#withSyntaxContext(node, () => this._runStmt(node));
 	}
-	_runStmt(node: acorn.Node): JSValue {
+	_runStmt(node: Node): JSValue | undefined {
+		if (node.bindings) {
+			for (const [name, binding] of node.bindings.entries()) {
+				// TODO implement TDZ
+				this.defineVar(binding.kind, name, { type: "undefined" });
+			}
+		}
+
+		if (node.functionDecls) {
+			// #run-functionDefs
+			for (const declNode of node.functionDecls) {
+				this.defineFunction(declNode);
+			}
+		}
+
 		const stmt = <acorn.Statement> node;
 		switch (stmt.type) {
 			// each of these handlers returns the *completion value* of the statement (if any)
@@ -948,11 +998,28 @@ export class VM {
 				throw new ProgramException(exceptionValue, this.synCtx);
 			}
 
-			case "FunctionDeclaration":
-				assert(!stmt.expression, "unsupported func decl type: expression");
-				assert(!stmt.generator, "unsupported func decl type: generator");
-				assert(!stmt.async, "unsupported func decl type: async");
-				return this.declareFunction(stmt);
+			case "FunctionDeclaration": {
+				// #run-FunctionDeclaration
+				// do nothing!
+				//   - hoistDeclarations must already have created the appopriate items on a
+				//     Node's `bindings` and `functionDefs` nodes.
+				//
+				//   - runStmt must already have created and assigned the function to its name
+				//     (if any; see #run-functionDefs).
+
+				// do nothing! see explanation: #run-FunctionDeclaration
+				// just provide completion value
+				const name = stmt.id?.name;
+				if (name !== undefined) {
+					const value = this.lookupVar(name);
+					assert(
+						value !== undefined,
+						"hoist bug: function name still unbound at stmt run time",
+					);
+					return value;
+				}
+				break;
+			}
 
 			case "ExpressionStatement":
 				// expression value becomes completion value
@@ -1035,7 +1102,7 @@ export class VM {
 					) {
 						// keep overwriting, return the last iteration's completion value
 						try {
-							completion = this.runStmt(stmt.body);
+							completion = this.runStmt(stmt.body) ?? completion;
 						} catch (e) {
 							if (e.break) break;
 							else if (e.continue) {
@@ -1101,7 +1168,7 @@ export class VM {
 				try {
 					while (this.coerceToBoolean(this.evalExpr(stmt.test))) {
 						try {
-							completion = this.runStmt(stmt.body);
+							completion = this.runStmt(stmt.body) ?? completion;
 						} catch (e) {
 							if (!e.continue) throw e;
 						}
@@ -1138,7 +1205,7 @@ export class VM {
 				if (caseIndex !== null) {
 					for (let i = caseIndex; i < caseCount; i++) {
 						for (const substmt of stmt.cases[i].consequent) {
-							completion = this.runStmt(substmt);
+							completion = this.runStmt(substmt) ?? completion;
 						}
 					}
 				}
@@ -1148,6 +1215,33 @@ export class VM {
 			default:
 				throw new AssertionError("not a (supported) statement: " + stmt.type);
 		}
+	}
+
+	defineFunction(declNode: {
+		params: acorn.Pattern[];
+		body: Node;
+		id?: acorn.Identifier | null;
+	}): VMFunction {
+		const func = this.makeFunction(declNode.params, declNode.body);
+
+		const name = declNode.id?.name;
+		if (name !== undefined) {
+			func.setProperty("name", { type: "string", value: name });
+
+			// `defineVar` must already have been done;
+			//   if the parent block is P,
+			//   the decl must have been hoisted and stored in `P.bindings`;
+			//   P.bindings must have been processed at the beginning of P's execution.
+			const check = this.lookupVar(name, { noParent: true });
+			assert(
+				check !== undefined,
+				"hoist bug: function not already defined",
+			);
+
+			this.setVar(name, func);
+		}
+
+		return func;
 	}
 
 	//
@@ -1221,10 +1315,10 @@ export class VM {
 			}
 
 			case "FunctionExpression": {
-				assert(!expr.expression, "unsupported: FunctionExpression.expression");
-				assert(!expr.generator, "unsupported: FunctionExpression.generator");
-				assert(!expr.async, "unsupported: FunctionExpression.async");
-				return this.declareFunction(expr);
+				// function *expressions* are not involved in declaration hoisting.
+				// just create the function and return it; define the name NOW (references
+				// before this expression will have failed with ReferenceError), if any.
+				return this.defineFunction(expr);
 			}
 
 			case "ObjectExpression": {
@@ -2429,28 +2523,6 @@ export class VM {
 
 		return str;
 	}
-
-	declareFunction(decl: {
-		id?: acorn.Identifier | null;
-		params: Node[];
-		body: Node;
-	}) {
-		const func = this.makeFunction(decl.params, decl.body);
-
-		if (decl.id === null || typeof decl.id === "undefined") {
-			/* nothing to do */
-		} else if (decl.id.type === "Identifier") {
-			const name = decl.id.name;
-			func.setProperty("name", { type: "string", value: name });
-			this.defineVar("let", name, func);
-		} else {
-			throw new AssertionError(
-				"unsupported identifier for function declaration: " + decl.id,
-			);
-		}
-
-		return func;
-	}
 }
 
 function stringToBigInt(s: string): bigint | undefined {
@@ -3440,8 +3512,99 @@ function expressionToPattern(argument: acorn.Expression): acorn.Pattern {
 	);
 }
 
-function hoistDeclarations(_node: acorn.Node) {
-	// TODO!
+// Scan the given node and its children recursively. Hoist all declarations:
+// as a consequence, every declaration is added to the `bindings` list of
+// the outermost node where the declaration is bound.
+function hoistDeclarations(node: Node) {
+	acornWalk.ancestor(node, {
+		FunctionDeclaration(node: acorn.FunctionDeclaration, _state, ancestors) {
+			hoist(node.id.name, ancestors, {
+				toTopOf: "block",
+				kind: "var",
+				overridable: true,
+				functionDecl: node,
+			});
+		},
+
+		VariableDeclaration(node: acorn.VariableDeclaration, _state, ancestors) {
+			for (const decl of node.declarations) {
+				assert(
+					decl.id.type === "Identifier",
+					"only supported: variable declarations with Identifier",
+				);
+
+				switch (node.kind) {
+					case "var":
+						hoist(decl.id.name, ancestors, {
+							toTopOf: "function",
+							kind: "var",
+							overridable: true,
+						});
+						break;
+
+					case "let":
+					case "const":
+						hoist(decl.id.name, ancestors, {
+							toTopOf: "block",
+							kind: "let",
+							overridable: false,
+						});
+						break;
+				}
+			}
+		},
+	});
+
+	interface HoistOptions {
+		toTopOf: "function" | "block";
+		overridable: boolean;
+		// TODO this detail should not leak. replace this with a more specific property
+		kind: "var" | "let"; // TODO add const?
+		functionDecl?: acorn.FunctionDeclaration;
+	}
+
+	function hoist(name: string, ancestors: Node[], options: HoistOptions) {
+		let dest: Node;
+
+		switch (options.toTopOf) {
+			case "block":
+				dest = ancestors[ancestors.length - 1];
+				break;
+
+			case "function": {
+				const anc = <
+					| acorn.FunctionDeclaration
+					| acorn.FunctionExpression
+					| undefined
+				> ancestors.findLast((anc) => {
+					anc.type === "FunctionDeclaration" ||
+						anc.type === "FunctionExpression";
+				});
+				// default: function-scoped declarations can also be hoisted simply to the script/module's toplevel scope
+				dest = anc?.body ?? ancestors[0];
+
+				break;
+			}
+
+			default:
+				throw new AssertionError();
+		}
+
+		dest.bindings ??= new Map();
+		dest.functionDecls ??= [];
+
+		// quadratic, but whatever
+		// TODO check redeclarations
+		if (!dest.bindings.has(name)) {
+			dest.bindings.set(name, {
+				kind: options.kind,
+			});
+		}
+
+		if (options.functionDecl) {
+			dest.functionDecls.push(options.functionDecl);
+		}
+	}
 }
 
 // vim:ts=4:sts=0:sw=0:et

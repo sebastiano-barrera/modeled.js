@@ -1227,6 +1227,15 @@ export class VM {
 	}): VMFunction {
 		const func = this.makeFunction(declNode.params, declNode.body);
 
+		const consFunction = this.globalObj.getProperty("Function");
+		assert(consFunction !== undefined, "undefined built-in: Function");
+		func.defineProperty("constructor", {
+			value: consFunction,
+			configurable: false,
+			enumerable: false,
+			writable: true,
+		});
+
 		const name = declNode.id?.name;
 		if (name !== undefined) {
 			func.setProperty("name", { type: "string", value: name });

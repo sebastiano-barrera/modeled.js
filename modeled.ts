@@ -85,6 +85,7 @@ interface Binding {
 	// this has no effect on hoisting, on the contrary, it is *produced* by
 	// hoistDeclarations.  It's just still needed for a few minor details.
 	kind: "let" | "var";
+	overridable: boolean;
 }
 
 // Throw an ExceptionRequest instance when a JavaScript exception should be
@@ -457,10 +458,17 @@ abstract class VMInvokable extends VMObject {
 					args.push({ type: "undefined" });
 				}
 
+				// #func-param-define
+				const definedParams = new Set<string>();
+				for (const name of this.params) {
+					if (definedParams.has(name)) continue;
+					vm.defineVar("var", name, { type: "undefined" });
+					definedParams.add(name);
+				}
 				for (const ndx in this.params) {
 					const name = this.params[ndx];
 					const value = args[ndx];
-					vm.defineVar("var", name, value);
+					vm.setVar(name, value);
 				}
 			}
 
@@ -732,6 +740,8 @@ export class VM {
 	// VM state (variables, stack, heap, ...)
 	//
 
+	// TODO remove `kind` (already handled by hoisting)
+	// TODO remove value initializer (already handled by hoisting; instead, initialize as TDZ)
 	defineVar(
 		kind: DeclKind,
 		name: string,
@@ -3518,6 +3528,7 @@ function expressionToPattern(argument: acorn.Expression): acorn.Pattern {
 function hoistDeclarations(node: Node) {
 	acornWalk.ancestor(node, {
 		FunctionDeclaration(node: acorn.FunctionDeclaration, _state, ancestors) {
+			// function parameter names are not defined in #func-param-define, not here
 			hoist(node.id.name, ancestors, {
 				toTopOf: "block",
 				kind: "var",
@@ -3595,10 +3606,17 @@ function hoistDeclarations(node: Node) {
 
 		// quadratic, but whatever
 		// TODO check redeclarations
-		if (!dest.bindings.has(name)) {
+		const predecl = dest.bindings.get(name);
+		if (predecl === undefined || predecl.overridable) {
 			dest.bindings.set(name, {
 				kind: options.kind,
+				overridable: options.overridable,
 			});
+		} else {
+			throw new ExceptionRequest(
+				"NameError",
+				"redeclaration not allowed: " + name,
+			);
 		}
 
 		if (options.functionDecl) {

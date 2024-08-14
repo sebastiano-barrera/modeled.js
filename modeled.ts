@@ -3595,19 +3595,21 @@ function hoistDeclarations(node: Node) {
 		let dest: Node;
 
 		switch (options.toTopOf) {
-			case "block":
-				dest = ancestors[ancestors.length - 1];
+			case "block": {
+				const anc = ancestors.findLast((anc) => anc.type === "BlockStatement");
+				dest = anc ?? ancestors[0];
 				break;
+			}
 
 			case "function": {
 				const anc = <
 					| acorn.FunctionDeclaration
 					| acorn.FunctionExpression
 					| undefined
-				> ancestors.findLast((anc) => {
+				> ancestors.findLast((anc) => (
 					anc.type === "FunctionDeclaration" ||
-						anc.type === "FunctionExpression";
-				});
+					anc.type === "FunctionExpression"
+				));
 				// default: function-scoped declarations can also be hoisted simply to the script/module's toplevel scope
 				dest = anc?.body ?? ancestors[0];
 

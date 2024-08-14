@@ -856,7 +856,9 @@ export class VM {
 					this.currentScope.isSetStrict = true;
 				}
 
-				this.runBlockBody(node.body);
+				// pass the full Program node to runStmt to make sure that hoisted declarations
+				// are processed
+				this.runStmt(node);
 
 				assert(this.currentScope === topScope, "stack manipulated!");
 				this.currentScope = null;
@@ -953,13 +955,14 @@ export class VM {
 			}
 		}
 
-		const stmt = <acorn.Statement> node;
+		const stmt = <acorn.Statement | acorn.Program> node;
 		switch (stmt.type) {
 			// each of these handlers returns the *completion value* of the statement (if any)
 
 			case "EmptyStatement":
 				return { type: "undefined" };
 
+			case "Program":
 			case "BlockStatement":
 				return this.withScope(() => {
 					return this.runBlockBody(stmt.body);
@@ -1016,19 +1019,9 @@ export class VM {
 				//
 				//   - runStmt must already have created and assigned the function to its name
 				//     (if any; see #run-functionDefs).
-
-				// do nothing! see explanation: #run-FunctionDeclaration
-				// just provide completion value
-				const name = stmt.id?.name;
-				if (name !== undefined) {
-					const value = this.lookupVar(name);
-					assert(
-						value !== undefined,
-						"hoist bug: function name still unbound at stmt run time",
-					);
-					return value;
-				}
-				break;
+				//
+				//   - doesn't even count for a completion value
+				return undefined;
 			}
 
 			case "ExpressionStatement":
@@ -3528,7 +3521,12 @@ function expressionToPattern(argument: acorn.Expression): acorn.Pattern {
 function hoistDeclarations(node: Node) {
 	acornWalk.ancestor(node, {
 		FunctionDeclaration(node: acorn.FunctionDeclaration, _state, ancestors) {
-			// function parameter names are not defined in #func-param-define, not here
+			assert(
+				ancestors[ancestors.length - 1] === node,
+				"unexpected: ancestors[last] is not node",
+			);
+			ancestors = ancestors.slice(0, -1);
+
 			hoist(node.id.name, ancestors, {
 				toTopOf: "block",
 				kind: "var",
@@ -3538,6 +3536,12 @@ function hoistDeclarations(node: Node) {
 		},
 
 		VariableDeclaration(node: acorn.VariableDeclaration, _state, ancestors) {
+			assert(
+				ancestors[ancestors.length - 1] === node,
+				"unexpected: ancestors[last] is not node",
+			);
+			ancestors = ancestors.slice(0, -1);
+
 			for (const decl of node.declarations) {
 				assert(
 					decl.id.type === "Identifier",
@@ -3561,6 +3565,9 @@ function hoistDeclarations(node: Node) {
 							overridable: false,
 						});
 						break;
+
+					default:
+						throw new AssertionError();
 				}
 			}
 		},
@@ -3574,6 +3581,7 @@ function hoistDeclarations(node: Node) {
 		functionDecl?: acorn.FunctionDeclaration;
 	}
 
+	/** NOTE `ancestors` MUST not include the declaration node itself */
 	function hoist(name: string, ancestors: Node[], options: HoistOptions) {
 		let dest: Node;
 

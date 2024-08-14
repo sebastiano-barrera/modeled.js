@@ -39,7 +39,7 @@ if (args.single) {
       const context = outcome.error.context;
       if (context) {
         for (const item of context) {
-          console.log(`\tectx\t${item.loc.source}:${item.loc.start.line}-${item.loc.end.line}:${item.loc.start.column}-${item.loc.start.column} ${item.type}`)
+          console.log(`\tectx\t${item.loc.source}:${item.loc.start.line}-${item.loc.end.line}:${item.loc.start.column}-${item.loc.end.column} ${item.type}`)
         }
       }
 

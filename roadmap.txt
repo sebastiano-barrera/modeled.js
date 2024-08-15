@@ -2,6 +2,7 @@
 - function captures (don't these work already?)
 - "holey" arrays (empty, rather than undefined, elements)
 - patterns as assignment targets
+- patterns as function parameters
 
 
 

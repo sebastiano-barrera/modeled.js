@@ -487,13 +487,22 @@ class VMFunction extends VMInvokable {
 	functionID: number = ++VMFunction.#lastID;
 	override readonly canConstruct = true;
 
-	constructor(public params: string[], public body: Node) {
+	constructor(
+		public params: string[],
+		public body: Node & acorn.BlockStatement,
+	) {
 		super();
 	}
 
 	run(vm: VM, _subject: JSValue, _args: JSValue[]) {
 		try {
-			vm.runStmt(this.body);
+			// do NOT create a new scope for the function! already done by VMInvokable
+			assert(
+				vm.currentScope?.lookupVar("arguments", { noParent: true }) !==
+					undefined,
+				"current scope is not the function's top scope?",
+			);
+			vm.runBlock(this.body);
 		} catch (e) {
 			if (e.returnValue) {
 				assert(
@@ -951,13 +960,32 @@ export class VM {
 		);
 
 		return this.withVarScope(() => {
-			return this.runBlockBody(ast.body);
+			return this.runBlock(ast);
 		});
 	}
 
-	runBlockBody(body: acorn.Program["body"]): JSValue {
+	runBlock(block: {
+		bindings?: Map<string, DefineOptions>;
+		functionDecls?: Iterable<acorn.FunctionDeclaration>;
+		body: acorn.Program["body"];
+	}): JSValue {
+		// important: the bindings must be done within the scope we just created!
+		if (block.bindings) {
+			for (const [name, defineOptions] of block.bindings.entries()) {
+				this.defineVar(name, defineOptions);
+			}
+		}
+
+		if (block.functionDecls) {
+			// #run-functionDefs
+			for (const declNode of block.functionDecls) {
+				this.defineFunction(declNode);
+			}
+		}
+
 		let completion: JSValue = { type: "undefined" };
-		for (const stmt of body) {
+
+		for (const stmt of block.body) {
 			// last iteration's CV becomes block's CV
 			completion = this.runStmt(stmt) ?? completion;
 		}
@@ -1016,21 +1044,7 @@ export class VM {
 				} else throw new AssertionError();
 
 				return this.withScope(scope, () => {
-					// important: the bindings must be done within the scope we just created!
-					if (node.bindings) {
-						for (const [name, defineOptions] of node.bindings.entries()) {
-							this.defineVar(name, defineOptions);
-						}
-					}
-
-					if (node.functionDecls) {
-						// #run-functionDefs
-						for (const declNode of node.functionDecls) {
-							this.defineFunction(declNode);
-						}
-					}
-
-					return this.runBlockBody(stmt.body);
+					return this.runBlock(stmt);
 				});
 			}
 
@@ -2089,7 +2103,11 @@ export class VM {
 		return tri2bool(this.compareLessThan(a, b));
 	}
 
-	makeFunction(paramNodes: Node[], body: Node, options: FnBuildOptions = {}) {
+	makeFunction(
+		paramNodes: Node[],
+		bodyNode: Node,
+		options: FnBuildOptions = {},
+	) {
 		const params = paramNodes.map((paramNode) => {
 			assert(
 				paramNode.type === "Identifier",
@@ -2098,19 +2116,28 @@ export class VM {
 			return (<acorn.Identifier> paramNode).name;
 		});
 
+		// TODO Is there a better way?
+		// I'm telling TypeScript to trust me on the bodyNode being BlockStatement,
+		// and then AFTERWARDS trying to run enough asserts to convince myself that I
+		// haven't lied to the compiler.
+		const bodyBlock = <acorn.BlockStatement> bodyNode;
 		assert(
-			body.type === "BlockStatement",
+			bodyBlock.type === "BlockStatement",
 			"only supported: BlockStatement as function body",
+		);
+		assert(
+			bodyBlock.body !== undefined && Array.isArray(bodyBlock.body),
+			"function body not a BlockStatement? invalid `body` property",
 		);
 		assert(this.currentScope !== null, "there must be a scope");
 
-		const func = new VMFunction(params, body);
+		const func = new VMFunction(params, bodyBlock);
 		if (!options.scopeStrictnessIrrelevant && this.currentScope.isStrict()) {
 			func.isStrict = true;
 		}
 
-		if (!func.isStrict && body.type === "BlockStatement") {
-			const stmts = (<acorn.BlockStatement> body).body;
+		if (!func.isStrict && bodyBlock.type === "BlockStatement") {
+			const stmts = bodyBlock.body;
 			if (
 				stmts.length > 0 &&
 				stmts[0].type === "ExpressionStatement" &&

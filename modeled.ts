@@ -459,6 +459,7 @@ abstract class VMInvokable extends VMObject {
 				for (const name of this.params) {
 					if (definedParams.has(name)) continue;
 					vm.defineVar(name, { allowRedecl: true });
+					vm.setDoNotDelete(name);
 					definedParams.add(name);
 				}
 				for (const ndx in this.params) {

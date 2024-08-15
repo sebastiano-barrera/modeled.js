@@ -964,27 +964,33 @@ export class VM {
 		});
 	}
 
+	doHoistedDeclarations(node: {
+		bindings?: Map<string, DefineOptions>;
+		functionDecls?: Iterable<acorn.FunctionDeclaration>;
+	}) {
+		if (node.bindings) {
+			for (const [name, defineOptions] of node.bindings.entries()) {
+				this.defineVar(name, defineOptions);
+			}
+		}
+
+		if (node.functionDecls) {
+			// #run-functionDefs
+			for (const declNode of node.functionDecls) {
+				this.defineFunction(declNode);
+			}
+		}
+	}
+
 	runBlock(block: {
 		bindings?: Map<string, DefineOptions>;
 		functionDecls?: Iterable<acorn.FunctionDeclaration>;
 		body: acorn.Program["body"];
 	}): JSValue {
 		// important: the bindings must be done within the scope we just created!
-		if (block.bindings) {
-			for (const [name, defineOptions] of block.bindings.entries()) {
-				this.defineVar(name, defineOptions);
-			}
-		}
-
-		if (block.functionDecls) {
-			// #run-functionDefs
-			for (const declNode of block.functionDecls) {
-				this.defineFunction(declNode);
-			}
-		}
+		this.doHoistedDeclarations(block);
 
 		let completion: JSValue = { type: "undefined" };
-
 		for (const stmt of block.body) {
 			// last iteration's CV becomes block's CV
 			completion = this.runStmt(stmt) ?? completion;
@@ -1014,12 +1020,13 @@ export class VM {
 
 		if (node.bindings || node.functionDecls) {
 			assert(
-				node.type === "Program" || node.type === "BlockStatement",
+				node.type === "Program" || node.type === "BlockStatement" ||
+					node.type === "SwitchStatement",
 				"hoist bug:variable declarations can only be attached to Program and BlockStatement nodes",
 			);
 		}
 
-		const stmt = <acorn.Statement | acorn.Program> node;
+		const stmt = <Node & (acorn.Statement | acorn.Program)> node;
 		switch (stmt.type) {
 			// each of these handlers returns the *completion value* of the statement (if any)
 
@@ -1272,6 +1279,7 @@ export class VM {
 			case "SwitchStatement": {
 				const discriminant = this.evalExpr(stmt.discriminant);
 
+				// figure out which case label we're jumping to...
 				const caseCount = stmt.cases.length;
 				let caseIndex = null;
 				let defaultIndex = null;
@@ -1289,15 +1297,23 @@ export class VM {
 						defaultIndex = i;
 					}
 				}
-
 				if (caseIndex === null) caseIndex = defaultIndex;
+
+				// ... then start executing case branches one by one, starting from the jump target
 				let completion: JSValue = { type: "undefined" };
 				if (caseIndex !== null) {
-					for (let i = caseIndex; i < caseCount; i++) {
-						for (const substmt of stmt.cases[i].consequent) {
-							completion = this.runStmt(substmt) ?? completion;
+					this.withVarScope(() => {
+						// as a special case, a SwitchStatement can have bindings/functionDefs, BUT 					//
+						// those are meant to be executed specifically within its {block}.
+						// they all run, regardless of the taken case branch
+						this.doHoistedDeclarations(stmt);
+
+						for (let i = caseIndex; i < caseCount; i++) {
+							for (const substmt of stmt.cases[i].consequent) {
+								completion = this.runStmt(substmt) ?? completion;
+							}
 						}
-					}
+					});
 				}
 				return completion;
 			}
@@ -3708,7 +3724,9 @@ function hoistDeclarations(node: Node) {
 
 		switch (options.toTopOf) {
 			case "block": {
-				const anc = ancestors.findLast((anc) => anc.type === "BlockStatement");
+				const anc = ancestors.findLast((anc) =>
+					anc.type === "BlockStatement" || anc.type === "SwitchStatement"
+				);
 				dest = anc ?? ancestors[0];
 				break;
 			}
@@ -3723,16 +3741,7 @@ function hoistDeclarations(node: Node) {
 					anc.type === "FunctionExpression"
 				));
 				// default: function-scoped declarations can also be hoisted simply to the script/module's toplevel scope
-				if (anc !== undefined) {
-					dest = anc.body;
-					assert(
-						dest.type === "BlockStatement",
-						"Function's body is not a block statement",
-					);
-				} else {
-					dest = ancestors[0];
-					assert(dest.type === "Program", "AST root is not a program?");
-				}
+				dest = anc?.body ?? ancestors[0];
 
 				break;
 			}
@@ -3742,7 +3751,8 @@ function hoistDeclarations(node: Node) {
 		}
 
 		assert(
-			dest.type === "Program" || dest.type === "BlockStatement",
+			dest.type === "Program" || dest.type === "BlockStatement" ||
+				dest.type === "SwitchStatement",
 			`invalid hoist destination (${dest.type})`,
 		);
 

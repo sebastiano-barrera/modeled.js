@@ -435,7 +435,7 @@ abstract class VMInvokable extends VMObject {
 			}
 		}
 
-		return vm.withScope(() => {
+		return vm.withVarScope(() => {
 			assert(vm.currentScope !== null, "no parent scope!");
 
 			vm.currentScope.isNew = isNew;
@@ -826,9 +826,7 @@ export class VM {
 		assert(this.currentScope !== null, "there must be a scope");
 		return this.currentScope.setDoNotDelete(name);
 	}
-	withScope<T>(inner: () => T): T {
-		const scope = new VarScope();
-
+	withScope<T>(scope: Scope, inner: () => T): T {
 		scope.parent = this.currentScope;
 		this.currentScope = scope;
 
@@ -838,6 +836,9 @@ export class VM {
 			assert(this.currentScope === scope, "stack manipulated!");
 			this.currentScope = scope.parent;
 		}
+	}
+	withVarScope<T>(inner: () => T): T {
+		return this.withScope(new VarScope(), inner);
 	}
 
 	get currentCallWrapper() {
@@ -897,55 +898,33 @@ export class VM {
 
 	runProgram(node: acorn.Program) {
 		assert(node.sourceType === "script", "only script is supported");
-		assert(node.type === "Program", "must be called with a Program node");
+		assert(this.currentScope === null, "nested program!");
 
 		hoistDeclarations(node);
 
-		return this.#withSyntaxContext(node, () => {
-			try {
-				assert(this.currentScope === null, "nested program!");
-
-				const topScope = new EnvScope(this.globalObj);
-				this.currentScope = topScope;
-				this.currentScope.this = this.globalObj;
-
-				if (
-					node.body.length > 0 &&
-					node.body[0].type === "ExpressionStatement" &&
-					node.body[0].directive === "use strict"
-				) {
-					this.currentScope.isSetStrict = true;
-				}
-
-				// pass the full Program node to runStmt to make sure that hoisted declarations
-				// are processed
-				this.runStmt(node);
-
-				assert(this.currentScope === topScope, "stack manipulated!");
-				this.currentScope = null;
-				return { outcome: "success" };
-			} catch (error) {
-				assert(
-					error.continue === undefined && error.break === undefined,
-					"vm bug: control-flow utility exception leaked!",
-				);
-				if (error instanceof ProgramException) {
-					const excval = error.exceptionValue;
-					const message = excval.type === "object"
-						? excval.getProperty("message")
-						: excval;
-					return {
-						outcome: "failure",
-						message,
-						error,
-					};
-				}
-
-				throw error;
-			} finally {
-				this.currentScope = null;
+		try {
+			// pass the full Program node to runStmt to make sure that hoisted declarations
+			// are processed
+			this.runStmt(node);
+			return { outcome: "success" };
+		} catch (error) {
+			assert(
+				error.continue === undefined && error.break === undefined,
+				"vm bug: control-flow utility exception leaked!",
+			);
+			if (error instanceof ProgramException) {
+				const excval = error.exceptionValue;
+				const message = excval.type === "object"
+					? excval.getProperty("message")
+					: excval;
+				return {
+					outcome: "failure",
+					message,
+					error,
+				};
 			}
-		});
+			throw error;
+		}
 	}
 
 	directEval(text: string) {
@@ -971,7 +950,7 @@ export class VM {
 			"result of parser is expected to be a Program",
 		);
 
-		return this.withScope(() => {
+		return this.withVarScope(() => {
 			return this.runBlockBody(ast.body);
 		});
 	}
@@ -1003,19 +982,13 @@ export class VM {
 	}
 	_runStmt(node: Node): JSValue | undefined {
 		const scope = this.currentScope;
-		assert(scope !== null, "!");
+		assert(node.type === "Program" || scope !== null, "!");
 
-		if (node.bindings) {
-			for (const [name, defineOptions] of node.bindings.entries()) {
-				this.defineVar(name, defineOptions);
-			}
-		}
-
-		if (node.functionDecls) {
-			// #run-functionDefs
-			for (const declNode of node.functionDecls) {
-				this.defineFunction(declNode);
-			}
+		if (node.bindings || node.functionDecls) {
+			assert(
+				node.type === "Program" || node.type === "BlockStatement",
+				"hoist bug:variable declarations can only be attached to Program and BlockStatement nodes",
+			);
 		}
 
 		const stmt = <acorn.Statement | acorn.Program> node;
@@ -1026,14 +999,44 @@ export class VM {
 				return { type: "undefined" };
 
 			case "Program":
-			case "BlockStatement":
-				return this.withScope(() => {
+			case "BlockStatement": {
+				let scope;
+				if (stmt.type === "Program") {
+					scope = new EnvScope(this.globalObj);
+					scope.this = this.globalObj;
+					if (
+						stmt.body.length > 0 &&
+						stmt.body[0].type === "ExpressionStatement" &&
+						stmt.body[0].directive === "use strict"
+					) {
+						scope.isSetStrict = true;
+					}
+				} else if (stmt.type === "BlockStatement") {
+					scope = new VarScope();
+				} else throw new AssertionError();
+
+				return this.withScope(scope, () => {
+					// important: the bindings must be done within the scope we just created!
+					if (node.bindings) {
+						for (const [name, defineOptions] of node.bindings.entries()) {
+							this.defineVar(name, defineOptions);
+						}
+					}
+
+					if (node.functionDecls) {
+						// #run-functionDefs
+						for (const declNode of node.functionDecls) {
+							this.defineFunction(declNode);
+						}
+					}
+
 					return this.runBlockBody(stmt.body);
 				});
+			}
 
 			case "TryStatement":
 				try {
-					return this.withScope(() => this.runStmt(stmt.block));
+					return this.withVarScope(() => this.runStmt(stmt.block));
 				} catch (err) {
 					if (err instanceof ProgramException && stmt.handler) {
 						assert(
@@ -1051,7 +1054,7 @@ export class VM {
 
 						const paramName = stmt.handler.param.name;
 						const body = stmt.handler.body;
-						return this.withScope(() => {
+						return this.withVarScope(() => {
 							this.defineVar(paramName, {
 								allowRedecl: false,
 								defaultValue: err.exceptionValue,
@@ -1065,7 +1068,7 @@ export class VM {
 						throw err;
 					}
 				} finally {
-					this.withScope(() => {
+					this.withVarScope(() => {
 						if (stmt.finalizer !== null && stmt.finalizer !== undefined) {
 							return this.runStmt(stmt.finalizer);
 						}
@@ -1160,7 +1163,7 @@ export class VM {
 			}
 
 			case "ForStatement":
-				return this.withScope(() => {
+				return this.withVarScope(() => {
 					let completion: JSValue = { type: "undefined" };
 
 					if (stmt.init !== null && stmt.init !== undefined) {
@@ -1193,7 +1196,7 @@ export class VM {
 
 			case "ForInStatement": {
 				const iteree = this.evalExpr(stmt.right);
-				return this.withScope(() => {
+				return this.withVarScope(() => {
 					let asmtTarget: acorn.Pattern;
 
 					if (stmt.left.type === "VariableDeclaration") {
@@ -3710,6 +3713,11 @@ function hoistDeclarations(node: Node) {
 			default:
 				throw new AssertionError();
 		}
+
+		assert(
+			dest.type === "Program" || dest.type === "BlockStatement",
+			`invalid hoist destination (${dest.type})`,
+		);
 
 		dest.bindings ??= new Map();
 		dest.functionDecls ??= [];

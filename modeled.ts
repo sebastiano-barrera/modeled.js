@@ -3204,9 +3204,12 @@ function createGlobalObject() {
 				return subject;
 			}
 
-			const ret = { type: primType, value: prim };
-			assertIsValue(ret);
-			return ret;
+			assertIsValue(prim);
+			assert(
+				prim.type === primType,
+				"bug: wrong type primitive returned by coerced:",
+			);
+			return prim;
 		}, { isConstructor: true });
 
 		G.setProperty(name, cons);

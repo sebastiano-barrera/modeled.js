@@ -105,7 +105,11 @@ class ExceptionRequest extends Error {
 class ProgramException extends Error {
 	context: acorn.Node[];
 
-	constructor(public exceptionValue: JSValue, context: acorn.Node[]) {
+	constructor(
+		public exceptionValue: JSValue,
+		context: acorn.Node[],
+		cause?: Error,
+	) {
 		let message: string | undefined;
 		if (exceptionValue.type === "string") {
 			message = exceptionValue.value;
@@ -118,10 +122,9 @@ class ProgramException extends Error {
 			}
 		}
 
-		super(
-			"interpreted js program exception" +
-				(message ? `: ${message}` : ""),
-		);
+		message = "interpreted js program exception" + (message ?? "");
+		super(message, { cause: cause });
+
 		this.exceptionValue = exceptionValue;
 
 		// copy the context.  it's too easy to accidentally assign the mutable context
@@ -2153,7 +2156,7 @@ export class VM {
 	throwTypeError(message: string): never {
 		return this.throwError("TypeError", message);
 	}
-	throwError(constructorName: string, message: string): never {
+	throwError(constructorName: string, message: string, cause?: Error): never {
 		const excCons = this.globalObj.getProperty(constructorName, this);
 		if (!(excCons instanceof VMInvokable)) {
 			throw new AssertionError("exception constructor must be invokable");
@@ -2164,7 +2167,8 @@ export class VM {
 		}
 		const messageValue: JSValue = { type: "string", value: message };
 		const exc = this.performNew(excCons, [messageValue]);
-		throw new ProgramException(exc, this.synCtx);
+
+		throw new ProgramException(exc, this.synCtx, cause);
 	}
 
 	coerceToObject(value: JSValue): VMObject {

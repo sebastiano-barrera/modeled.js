@@ -65,7 +65,7 @@ interface Node extends acorn.Node {
 	 * are processed, the only way to bind another name  during the course of this
 	 * node's execution is with a FunctionExpression.
 	 */
-	bindings?: Map<string, Binding>;
+	bindings?: Map<string, DefineOptions>;
 
 	/**
 	 * Function declarations.
@@ -79,13 +79,6 @@ interface Node extends acorn.Node {
 	 * so order matters.
 	 */
 	functionDecls?: acorn.FunctionDeclaration[];
-}
-
-interface Binding {
-	// this has no effect on hoisting, on the contrary, it is *produced* by
-	// hoistDeclarations.  It's just still needed for a few minor details.
-	kind: "let" | "var";
-	overridable: boolean;
 }
 
 // Throw an ExceptionRequest instance when a JavaScript exception should be
@@ -122,7 +115,7 @@ class ProgramException extends Error {
 			}
 		}
 
-		message = "interpreted js program exception" + (message ?? "");
+		message = "interpreted js program exception: " + (message ?? "");
 		super(message, { cause: cause });
 
 		this.exceptionValue = exceptionValue;
@@ -465,7 +458,7 @@ abstract class VMInvokable extends VMObject {
 				const definedParams = new Set<string>();
 				for (const name of this.params) {
 					if (definedParams.has(name)) continue;
-					vm.defineVar("var", name, { type: "undefined" });
+					vm.defineVar(name, { allowRedecl: true });
 					definedParams.add(name);
 				}
 				for (const ndx in this.params) {
@@ -475,14 +468,14 @@ abstract class VMInvokable extends VMObject {
 				}
 			}
 
-			vm.defineVar("var", "arguments", () => {
+			vm.defineVar("arguments", { allowRedecl: true });
+			vm.setVar("arguments", () => {
 				const argumentsArray = new VMArray();
 				argumentsArray.arrayElements.push(...args);
 				return argumentsArray;
 			});
 
-			// another scope, to allow redefinitions
-			return vm.withScope(() => this.run(vm, subject, args, options));
+			return this.run(vm, subject, args, options);
 		});
 	}
 }
@@ -582,17 +575,34 @@ abstract class Scope {
 	}
 
 	abstract defineVar(
-		kind: DeclKind,
+		name: string,
+		defineOptions: DefineOptions,
+	): void;
+	abstract setVar(
 		name: string,
 		valueOrThunk: JSValue | (() => JSValue),
+		vm?: VM,
 	): void;
-	abstract setVar(name: string, value: JSValue, vm?: VM): void;
 	abstract lookupVar(
 		name: string,
 		options?: LookupOptions,
-	): JSValue | undefined;
+	): JSValue | "TDZ" | undefined;
 	abstract deleteVar(name: string): boolean;
 	abstract setDoNotDelete(name: string): void;
+}
+
+interface DefineOptions {
+	allowRedecl: boolean;
+
+	/** default: false */
+	allowAsGlobalObjectProperty?: boolean;
+
+	/**
+	 * the variable is initialized to this value, if not defined already.
+	 * if this property is not set, the variable starts in the Temporal Dead Zone
+	 * (TDZ) state.
+	 */
+	defaultValue?: JSValue;
 }
 
 interface LookupOptions {
@@ -610,7 +620,8 @@ function assertValidDeclKind(kind: string): asserts kind is DeclKind {
 }
 
 class VarScope extends Scope {
-	vars = new Map<string, JSValue | (() => JSValue)>();
+	vars = new Map<string, "TDZ" | JSValue | (() => JSValue)>();
+	dontOverride = new Set<string>();
 	dontDelete = new Set<string>();
 
 	// true iff this scope is the function's wrapper
@@ -621,22 +632,42 @@ class VarScope extends Scope {
 	isCallWrapper = false;
 
 	defineVar(
-		kind: DeclKind,
 		name: string,
-		valueOrThunk: JSValue | (() => JSValue),
+		defineOptions: DefineOptions,
 	) {
-		assertValidDeclKind(kind);
-		assert(!this.vars.has(name), "hoist bug: double defineVar for " + name);
-		this.vars.set(name, valueOrThunk);
+		if (this.dontOverride.has(name)) {
+			throw new ExceptionRequest(
+				"SyntaxError",
+				"hoist bug: double defineVar for " + name,
+			);
+		}
+
+		if (!defineOptions.allowRedecl) {
+			this.dontOverride.add(name);
+		}
+
+		if (!this.vars.has(name)) {
+			let value: "TDZ" | JSValue = "TDZ";
+
+			if (defineOptions.defaultValue !== undefined && !this.vars.has(name)) {
+				value = defineOptions.defaultValue;
+			}
+
+			this.vars.set(name, value);
+		}
 	}
 
-	setVar(name: string, value: JSValue, vm: VM) {
+	override setVar(
+		name: string,
+		valueOrThunk: JSValue | (() => JSValue),
+		vm: VM,
+	) {
 		assert(
 			vm instanceof VM,
 			"vm not passed (required to throw ReferenceError)",
 		);
-		if (this.vars.has(name)) this.vars.set(name, value);
-		else if (this.parent) this.parent.setVar(name, value, vm);
+		if (this.vars.has(name)) this.vars.set(name, valueOrThunk);
+		else if (this.parent) this.parent.setVar(name, valueOrThunk, vm);
 		else if (this.isStrict()) {
 			return vm.throwError("NameError", "unbound variable: " + name);
 		}
@@ -645,24 +676,29 @@ class VarScope extends Scope {
 	override lookupVar(
 		name: string,
 		options?: LookupOptions,
-	): JSValue | undefined {
+	): JSValue | "TDZ" | undefined {
 		let value = this.vars.get(name);
+
 		if (typeof value === "function") {
-			value = value();
+			// resolve thunk to value
+			value = typeof value === "function" ? value() : value;
+			this.vars.set(name, value);
 		}
+
 		if (typeof value !== "undefined") return value;
+
 		const noParent = options?.noParent ?? false;
 		if (!noParent && this.parent) return this.parent.lookupVar(name);
 		return undefined;
 	}
 
-	deleteVar(name: string) {
+	override deleteVar(name: string) {
 		// TODO involve parent scopes
 		if (this.dontDelete.has(name)) return false;
 		return this.vars.delete(name);
 	}
 
-	setDoNotDelete(name: string) {
+	override setDoNotDelete(name: string) {
 		this.dontDelete.add(name);
 	}
 }
@@ -674,17 +710,26 @@ class EnvScope extends Scope {
 		super();
 	}
 
-	defineVar(kind: DeclKind, name: string, value: JSValue): void {
-		if (kind === "var" || kind === "function") {
-			this.env.defineProperty(name, {
-				value,
-				configurable: false,
-				enumerable: true,
-				writable: true,
-			});
+	defineVar(name: string, options: DefineOptions): void {
+		if (!options.allowAsGlobalObjectProperty) {
+			throw new ExceptionRequest("SyntaxError", "nyi: let/const at toplevel");
 		}
+
+		if (!options.allowRedecl && this.env.containsOwnProperty(name)) {
+			throw new ExceptionRequest(
+				"SyntaxError",
+				"redeclaration not allowed: " + name,
+			);
+		}
+
+		this.env.defineProperty(name, {
+			value: { type: "undefined" },
+			configurable: false,
+			enumerable: true,
+			writable: true,
+		});
 	}
-	setVar(name: string, value: JSValue, vm?: VM): void {
+	setVar(name: string, valueOrThunk: JSValue | (() => JSValue), vm?: VM): void {
 		assert(
 			vm instanceof VM,
 			"bug: vm not passed (required to throw ReferenceError)",
@@ -698,10 +743,13 @@ class EnvScope extends Scope {
 			);
 		}
 
+		const value = typeof valueOrThunk === "function"
+			? valueOrThunk()
+			: valueOrThunk;
 		this.env.setProperty(name, value);
 	}
 
-	lookupVar(name: string): JSValue | undefined {
+	lookupVar(name: string): JSValue | "TDZ" | undefined {
 		if (!this.env.containsOwnProperty(name)) return undefined;
 		return this.env.getProperty(name);
 	}
@@ -746,16 +794,15 @@ export class VM {
 	// TODO remove `kind` (already handled by hoisting)
 	// TODO remove value initializer (already handled by hoisting; instead, initialize as TDZ)
 	defineVar(
-		kind: DeclKind,
 		name: string,
-		valueOrThunk: JSValue | (() => JSValue),
+		options: DefineOptions,
 	) {
 		assert(this.currentScope !== null, "there must be a scope");
-		return this.currentScope.defineVar(kind, name, valueOrThunk);
+		return this.currentScope.defineVar(name, options);
 	}
-	setVar(name: string, value: JSValue, _vm?: VM) {
+	setVar(name: string, valueOrThunk: JSValue | (() => JSValue), _vm?: VM) {
 		assert(this.currentScope !== null, "there must be a scope");
-		return this.currentScope.setVar(name, value, this);
+		return this.currentScope.setVar(name, valueOrThunk, this);
 	}
 	deleteVar(name: string) {
 		assert(this.currentScope !== null, "there must be a scope");
@@ -765,12 +812,23 @@ export class VM {
 		assert(this.currentScope !== null, "there must be a scope");
 		return this.currentScope.lookupVar(name, options);
 	}
+	accessVar(name: string): JSValue | undefined {
+		const value = this.lookupVar(name);
+		if (value === "TDZ") {
+			return this.throwError(
+				"ReferenceError",
+				"variable accessed before initialization",
+			);
+		}
+		return value;
+	}
 	setDoNotDelete(name: string) {
 		assert(this.currentScope !== null, "there must be a scope");
 		return this.currentScope.setDoNotDelete(name);
 	}
 	withScope<T>(inner: () => T): T {
 		const scope = new VarScope();
+
 		scope.parent = this.currentScope;
 		this.currentScope = scope;
 
@@ -944,10 +1002,12 @@ export class VM {
 		return this.#withSyntaxContext(node, () => this._runStmt(node));
 	}
 	_runStmt(node: Node): JSValue | undefined {
+		const scope = this.currentScope;
+		assert(scope !== null, "!");
+
 		if (node.bindings) {
-			for (const [name, binding] of node.bindings.entries()) {
-				// TODO implement TDZ
-				this.defineVar(binding.kind, name, { type: "undefined" });
+			for (const [name, defineOptions] of node.bindings.entries()) {
+				this.defineVar(name, defineOptions);
 			}
 		}
 
@@ -992,7 +1052,10 @@ export class VM {
 						const paramName = stmt.handler.param.name;
 						const body = stmt.handler.body;
 						return this.withScope(() => {
-							this.defineVar("let", paramName, err.exceptionValue);
+							this.defineVar(paramName, {
+								allowRedecl: false,
+								defaultValue: err.exceptionValue,
+							});
 							this.setDoNotDelete(paramName);
 							return this.runStmt(body);
 						});
@@ -1057,11 +1120,15 @@ export class VM {
 						"decl type must be VariableDeclarator",
 					);
 					if (decl.id.type === "Identifier") {
+						if (decl.init === undefined || decl.init === null) {
+							continue;
+						}
 						const name = decl.id.name;
-						const value: JSValue = decl.init
-							? this.evalExpr(decl.init)
-							: { type: "undefined" };
-						this.defineVar(stmt.kind, name, value);
+						const value: JSValue = this.evalExpr(decl.init);
+
+						// `defineVar` for this name must have already been done by hoistDeclarations
+						// and #run-functionDefs
+						this.setVar(name, value);
 
 						if (stmt.declarations.length === 1) {
 							completion = value;
@@ -1254,6 +1321,9 @@ export class VM {
 			);
 
 			this.setVar(name, func);
+
+			const valueCheck = this.lookupVar(name);
+			assert(Object.is(valueCheck, func), "variable set failed");
 		}
 
 		return func;
@@ -1488,7 +1558,7 @@ export class VM {
 					}
 				} else if (expr.operator === "typeof") {
 					if (expr.argument.type === "Identifier") {
-						const value = this.currentScope.lookupVar(expr.argument.name);
+						const value = this.accessVar(expr.argument.name);
 						// particular case in the language: naked UNBOUND identifier result in undefined
 						if (value === undefined) {
 							return { type: "string", value: "undefined" };
@@ -1681,7 +1751,7 @@ export class VM {
 				}
 				if (expr.name === "NaN") return { type: "number", value: NaN };
 
-				const value = this.lookupVar(expr.name);
+				const value = this.accessVar(expr.name);
 				if (value === undefined) {
 					this.throwError("ReferenceError", "unbound variable: " + expr.name);
 				}
@@ -3545,9 +3615,11 @@ function hoistDeclarations(node: Node) {
 
 			hoist(node.id.name, ancestors, {
 				toTopOf: "block",
-				kind: "var",
-				overridable: true,
 				functionDecl: node,
+				defineOptions: {
+					allowRedecl: true,
+					allowAsGlobalObjectProperty: true,
+				},
 			});
 		},
 
@@ -3568,8 +3640,11 @@ function hoistDeclarations(node: Node) {
 					case "var":
 						hoist(decl.id.name, ancestors, {
 							toTopOf: "function",
-							kind: "var",
-							overridable: true,
+							defineOptions: {
+								defaultValue: { type: "undefined" },
+								allowRedecl: true,
+								allowAsGlobalObjectProperty: true,
+							},
 						});
 						break;
 
@@ -3577,8 +3652,10 @@ function hoistDeclarations(node: Node) {
 					case "const":
 						hoist(decl.id.name, ancestors, {
 							toTopOf: "block",
-							kind: "let",
-							overridable: false,
+							defineOptions: {
+								allowRedecl: false,
+								allowAsGlobalObjectProperty: false,
+							},
 						});
 						break;
 
@@ -3591,10 +3668,8 @@ function hoistDeclarations(node: Node) {
 
 	interface HoistOptions {
 		toTopOf: "function" | "block";
-		overridable: boolean;
-		// TODO this detail should not leak. replace this with a more specific property
-		kind: "var" | "let"; // TODO add const?
 		functionDecl?: acorn.FunctionDeclaration;
+		defineOptions: DefineOptions;
 	}
 
 	/** NOTE `ancestors` MUST not include the declaration node itself */
@@ -3618,7 +3693,16 @@ function hoistDeclarations(node: Node) {
 					anc.type === "FunctionExpression"
 				));
 				// default: function-scoped declarations can also be hoisted simply to the script/module's toplevel scope
-				dest = anc?.body ?? ancestors[0];
+				if (anc !== undefined) {
+					dest = anc.body;
+					assert(
+						dest.type === "BlockStatement",
+						"Function's body is not a block statement",
+					);
+				} else {
+					dest = ancestors[0];
+					assert(dest.type === "Program", "AST root is not a program?");
+				}
 
 				break;
 			}
@@ -3630,14 +3714,9 @@ function hoistDeclarations(node: Node) {
 		dest.bindings ??= new Map();
 		dest.functionDecls ??= [];
 
-		// quadratic, but whatever
-		// TODO check redeclarations
 		const predecl = dest.bindings.get(name);
-		if (predecl === undefined || predecl.overridable) {
-			dest.bindings.set(name, {
-				kind: options.kind,
-				overridable: options.overridable,
-			});
+		if (predecl === undefined || predecl.allowRedecl) {
+			dest.bindings.set(name, options.defineOptions);
 		} else {
 			throw new ExceptionRequest(
 				"NameError",

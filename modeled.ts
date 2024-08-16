@@ -406,7 +406,7 @@ abstract class VMInvokable extends VMObject {
 	params?: string[];
 	canConstruct: boolean = false;
 
-	constructor(consPrototype?: VMObject) {
+	constructor(public readonly declScope: Scope, consPrototype?: VMObject) {
 		super(R().PROTO_FUNCTION);
 		if (consPrototype === undefined) {
 			consPrototype = new VMObject();
@@ -435,49 +435,50 @@ abstract class VMInvokable extends VMObject {
 			}
 		}
 
-		return vm.withVarScope(() => {
-			assert(vm.currentScope !== null, "no parent scope!");
+		return vm.switchScope(this.declScope, () =>
+			vm.nestScope(() => {
+				assert(vm.currentScope !== null, "no parent scope!");
 
-			vm.currentScope.isNew = isNew;
-			assert(subject !== undefined, "!");
-			vm.currentScope.this = subject;
-			assert(
-				this.isStrict || subject instanceof VMObject,
-				"bug in this-substitution: non strict && this is not object",
-			);
-			vm.currentScope.isCallWrapper = true;
-			vm.currentScope.isSetStrict = this.isStrict;
+				vm.currentScope.isNew = isNew;
+				assert(subject !== undefined, "!");
+				vm.currentScope.this = subject;
+				assert(
+					this.isStrict || subject instanceof VMObject,
+					"bug in this-substitution: non strict && this is not object",
+				);
+				vm.currentScope.isCallWrapper = true;
+				vm.currentScope.isSetStrict = this.isStrict;
 
-			// not all subclasses have named params
-			if (this.params !== undefined) {
-				while (args.length < this.params.length) {
-					args.push({ type: "undefined" });
+				// not all subclasses have named params
+				if (this.params !== undefined) {
+					while (args.length < this.params.length) {
+						args.push({ type: "undefined" });
+					}
+
+					// #func-param-define
+					const definedParams = new Set<string>();
+					for (const name of this.params) {
+						if (definedParams.has(name)) continue;
+						vm.defineVar(name, { allowRedecl: true });
+						vm.setDoNotDelete(name);
+						definedParams.add(name);
+					}
+					for (const ndx in this.params) {
+						const name = this.params[ndx];
+						const value = args[ndx];
+						vm.setVar(name, value);
+					}
 				}
 
-				// #func-param-define
-				const definedParams = new Set<string>();
-				for (const name of this.params) {
-					if (definedParams.has(name)) continue;
-					vm.defineVar(name, { allowRedecl: true });
-					vm.setDoNotDelete(name);
-					definedParams.add(name);
-				}
-				for (const ndx in this.params) {
-					const name = this.params[ndx];
-					const value = args[ndx];
-					vm.setVar(name, value);
-				}
-			}
+				vm.defineVar("arguments", { allowRedecl: true });
+				vm.setVar("arguments", () => {
+					const argumentsArray = new VMArray();
+					argumentsArray.arrayElements.push(...args);
+					return argumentsArray;
+				});
 
-			vm.defineVar("arguments", { allowRedecl: true });
-			vm.setVar("arguments", () => {
-				const argumentsArray = new VMArray();
-				argumentsArray.arrayElements.push(...args);
-				return argumentsArray;
-			});
-
-			return this.run(vm, subject, args, options);
-		});
+				return this.run(vm, subject, args, options);
+			}));
 	}
 }
 
@@ -491,8 +492,9 @@ class VMFunction extends VMInvokable {
 	constructor(
 		public params: string[],
 		public body: Node & acorn.BlockStatement,
+		public declScope: Scope,
 	) {
-		super();
+		super(declScope);
 	}
 
 	run(vm: VM, _subject: JSValue, _args: JSValue[]) {
@@ -537,6 +539,9 @@ abstract class Scope {
 	isSetStrict = false;
 
 	parent: Scope | null = null;
+
+	private static lastScopeID = 0;
+	ID = Scope.lastScopeID++;
 
 	walkParents<T>(fn: (_: Scope) => T): T | null {
 		let scope: Scope | null;
@@ -695,7 +700,12 @@ class VarScope extends Scope {
 			this.vars.set(name, value);
 		}
 
-		if (typeof value !== "undefined") return value;
+		if (typeof value !== "undefined") {
+			if (name === "p") {
+				console.log("resolved p @ ", this.ID);
+			}
+			return value;
+		}
 
 		const noParent = options?.noParent ?? false;
 		if (!noParent && this.parent) return this.parent.lookupVar(name);
@@ -836,19 +846,21 @@ export class VM {
 		assert(this.currentScope !== null, "there must be a scope");
 		return this.currentScope.setDoNotDelete(name);
 	}
-	withScope<T>(scope: Scope, inner: () => T): T {
-		scope.parent = this.currentScope;
+	switchScope<T>(scope: Scope, inner: () => T): T {
+		const savedScope = this.currentScope;
 		this.currentScope = scope;
 
 		try {
 			return inner();
 		} finally {
 			assert(this.currentScope === scope, "stack manipulated!");
-			this.currentScope = scope.parent;
+			this.currentScope = savedScope;
 		}
 	}
-	withVarScope<T>(inner: () => T): T {
-		return this.withScope(new VarScope(), inner);
+	nestScope<T>(action: () => T): T {
+		const scope = new VarScope();
+		scope.parent = this.currentScope;
+		return this.switchScope(scope, action);
 	}
 
 	get currentCallWrapper() {
@@ -960,7 +972,7 @@ export class VM {
 			"result of parser is expected to be a Program",
 		);
 
-		return this.withVarScope(() => {
+		return this.nestScope(() => {
 			return this.runBlock(ast);
 		});
 	}
@@ -1021,7 +1033,9 @@ export class VM {
 
 		if (node.bindings || node.functionDecls) {
 			assert(
-				node.type === "Program" || node.type === "BlockStatement" ||
+				node.type === "Program" ||
+					node.type === "BlockStatement" ||
+					node.type === "ForInStatement" ||
 					node.type === "SwitchStatement",
 				"hoist bug:variable declarations can only be attached to Program and BlockStatement nodes",
 			);
@@ -1051,14 +1065,16 @@ export class VM {
 					scope = new VarScope();
 				} else throw new AssertionError();
 
-				return this.withScope(scope, () => {
+				scope.parent = this.currentScope;
+
+				return this.switchScope(scope, () => {
 					return this.runBlock(stmt);
 				});
 			}
 
 			case "TryStatement":
 				try {
-					return this.withVarScope(() => this.runStmt(stmt.block));
+					return this.nestScope(() => this.runStmt(stmt.block));
 				} catch (err) {
 					if (err instanceof ProgramException && stmt.handler) {
 						assert(
@@ -1076,7 +1092,7 @@ export class VM {
 
 						const paramName = stmt.handler.param.name;
 						const body = stmt.handler.body;
-						return this.withVarScope(() => {
+						return this.nestScope(() => {
 							this.defineVar(paramName, {
 								allowRedecl: false,
 								defaultValue: err.exceptionValue,
@@ -1090,7 +1106,7 @@ export class VM {
 						throw err;
 					}
 				} finally {
-					this.withVarScope(() => {
+					this.nestScope(() => {
 						if (stmt.finalizer !== null && stmt.finalizer !== undefined) {
 							return this.runStmt(stmt.finalizer);
 						}
@@ -1145,6 +1161,12 @@ export class VM {
 						"decl type must be VariableDeclarator",
 					);
 					if (decl.id.type === "Identifier") {
+						console.log(
+							"declare variable",
+							decl.id.name,
+							"scope",
+							this.currentScope!.ID,
+						);
 						if (decl.init === undefined || decl.init === null) {
 							continue;
 						}
@@ -1185,7 +1207,7 @@ export class VM {
 			}
 
 			case "ForStatement":
-				return this.withVarScope(() => {
+				return this.nestScope(() => {
 					let completion: JSValue = { type: "undefined" };
 
 					if (stmt.init !== null && stmt.init !== undefined) {
@@ -1218,43 +1240,52 @@ export class VM {
 
 			case "ForInStatement": {
 				const iteree = this.evalExpr(stmt.right);
-				return this.withVarScope(() => {
-					let asmtTarget: acorn.Pattern;
-
-					if (stmt.left.type === "VariableDeclaration") {
-						assert(
-							stmt.left.declarations.length === 1 &&
-								stmt.left.declarations[0].type === "VariableDeclarator" &&
-								stmt.left.declarations[0].init === null &&
-								stmt.left.declarations[0].id.type === "Identifier",
-							"only supported: single declaration with no init and a simple identifier as the pattern",
-						);
-						this.runStmt(stmt.left);
-						asmtTarget = stmt.left.declarations[0].id;
-					} else if (stmt.left.type === "Identifier") {
-						asmtTarget = stmt.left;
-					} else {
-						throw new AssertionError(
-							`in for(...in...) statement: left-hand side syntax not supported: ${stmt.left.type}`,
-						);
-					}
-
+				return this.nestScope(() => {
 					assert(iteree instanceof VMObject, "only supported: object iteree");
 					const properties = iteree.getOwnEnumerablePropertyNames();
 					for (const name of properties) {
-						let nameJSV: JSValue;
-						if (typeof name === "string") {
-							nameJSV = { type: "string", value: name };
-						} else if (typeof name === "symbol") {
-							nameJSV = { type: "symbol", value: name };
-						} else {
-							throw new AssertionError(
-								`getOwnPropertyNames must return string or symbol, not ${typeof name}`,
-							);
-						}
+						// a new scope is created at each iteration, so that the iteration variable is
+						// distinct (different identity) at each cycle.
+						this.nestScope(() => {
+							let asmtTarget: acorn.Pattern;
 
-						this.doAssignment(asmtTarget, nameJSV);
-						this.runStmt(stmt.body);
+							if (stmt.left.type === "VariableDeclaration") {
+								assert(
+									stmt.left.declarations.length === 1 &&
+										stmt.left.declarations[0].type === "VariableDeclarator" &&
+										stmt.left.declarations[0].init === null &&
+										stmt.left.declarations[0].id.type === "Identifier",
+									"only supported: single declaration with no init and a simple identifier as the pattern",
+								);
+								this.runStmt(stmt.left);
+								asmtTarget = stmt.left.declarations[0].id;
+
+								assert(
+									this.currentScope!.lookupVar(asmtTarget, { noParent: true }),
+									"iteration variable got defined in the wrong scope",
+								);
+							} else if (stmt.left.type === "Identifier") {
+								asmtTarget = stmt.left;
+							} else {
+								throw new AssertionError(
+									`in for(...in...) statement: left-hand side syntax not supported: ${stmt.left.type}`,
+								);
+							}
+
+							let nameJSV: JSValue;
+							if (typeof name === "string") {
+								nameJSV = { type: "string", value: name };
+							} else if (typeof name === "symbol") {
+								nameJSV = { type: "symbol", value: name };
+							} else {
+								throw new AssertionError(
+									`getOwnPropertyNames must return string or symbol, not ${typeof name}`,
+								);
+							}
+
+							this.doAssignment(asmtTarget, nameJSV);
+							this.runStmt(stmt.body);
+						});
 					}
 
 					return { type: "undefined" };
@@ -1303,7 +1334,7 @@ export class VM {
 				// ... then start executing case branches one by one, starting from the jump target
 				let completion: JSValue = { type: "undefined" };
 				if (caseIndex !== null) {
-					this.withVarScope(() => {
+					this.nestScope(() => {
 						// as a special case, a SwitchStatement can have bindings/functionDefs, BUT 					//
 						// those are meant to be executed specifically within its {block}.
 						// they all run, regardless of the taken case branch
@@ -2148,7 +2179,7 @@ export class VM {
 		);
 		assert(this.currentScope !== null, "there must be a scope");
 
-		const func = new VMFunction(params, bodyBlock);
+		const func = new VMFunction(params, bodyBlock, this.currentScope);
 		if (!options.scopeStrictnessIrrelevant && this.currentScope.isStrict()) {
 			func.isStrict = true;
 		}
@@ -2695,11 +2726,14 @@ function nativeVMFunc(
 	innerImpl: NativeFunc,
 	options: NativeFuncOptions = {},
 ): VMInvokable {
+	// our way of saying: native functions don't have any real "lexical scope" to
+	// access
+	const parentScope = new VarScope();
 	return new class extends VMInvokable {
 		canConstruct = options.isConstructor ?? false;
 		// in innerImpl, `this` is the VMInvokable object
 		run = innerImpl;
-	}();
+	}(parentScope);
 }
 
 interface FnBuildOptions {
@@ -3087,7 +3121,7 @@ function createGlobalObject() {
 			new class extends VMInvokable {
 				canConstruct = true;
 				constructor() {
-					super(proto);
+					super(new VarScope(), proto);
 				}
 				override run(
 					vm: VM,
@@ -3524,23 +3558,11 @@ function createGlobalObject() {
 			// this function is only looked up for indirect eval; direct eval has a
 			// dedicated path in the parser
 
-			// we're calling directEval but this is indirect eval. the scope where
-			// the passed code is evaluated in the global scope, not the one
-			// where the call appears
-			if (args.length === 0) {
-				return { type: "undefined" };
-			}
-
-			if (args[0].type !== "string") {
-				return vm.throwTypeError("eval must be called with a string");
-			}
-
 			// the comments are from:
 			// https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/eval
-			assert(vm.currentScope instanceof Scope, "there must be a scope where");
-			const savedScope = vm.currentScope;
+			assert(vm.currentScope instanceof Scope, "there must be a scope here");
 			const rootScope = vm.currentScope.getRoot();
-			try {
+			return vm.switchScope(rootScope, () => {
 				// Indirect eval works in the global scope rather than the local
 				// scope, and the code being evaluated doesn't have access to
 				// local variables within the scope where it's being called
@@ -3548,11 +3570,20 @@ function createGlobalObject() {
 				// Indirect eval does not inherit the strictness of the
 				// surrounding context, and is only in strict mode if the source
 				// string itself has a "use strict" directive.
-				vm.currentScope = rootScope;
+
+				// we're calling directEval but this is indirect eval. the scope where
+				// the passed code is evaluated in the global scope, not the one
+				// where the call appears
+				if (args.length === 0) {
+					return { type: "undefined" };
+				}
+
+				if (args[0].type !== "string") {
+					return vm.throwTypeError("eval must be called with a string");
+				}
+
 				return vm.directEval(args[0].value);
-			} finally {
-				vm.currentScope = savedScope;
-			}
+			});
 		}),
 	);
 
@@ -3726,7 +3757,9 @@ function hoistDeclarations(node: Node) {
 		switch (options.toTopOf) {
 			case "block": {
 				const anc = ancestors.findLast((anc) =>
-					anc.type === "BlockStatement" || anc.type === "SwitchStatement"
+					anc.type === "BlockStatement" ||
+					anc.type === "SwitchStatement" ||
+					anc.type === "ForInStatement"
 				);
 				dest = anc ?? ancestors[0];
 				break;
@@ -3752,10 +3785,14 @@ function hoistDeclarations(node: Node) {
 		}
 
 		assert(
-			dest.type === "Program" || dest.type === "BlockStatement" ||
+			dest.type === "Program" ||
+				dest.type === "BlockStatement" ||
+				dest.type === "ForInStatement" ||
 				dest.type === "SwitchStatement",
 			`invalid hoist destination (${dest.type})`,
 		);
+
+		console.log("hoist", name, "to", dest.type);
 
 		dest.bindings ??= new Map();
 		dest.functionDecls ??= [];

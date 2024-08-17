@@ -700,12 +700,7 @@ class VarScope extends Scope {
 			this.vars.set(name, value);
 		}
 
-		if (typeof value !== "undefined") {
-			if (name === "p") {
-				console.log("resolved p @ ", this.ID);
-			}
-			return value;
-		}
+		if (typeof value !== "undefined") return value;
 
 		const noParent = options?.noParent ?? false;
 		if (!noParent && this.parent) return this.parent.lookupVar(name);
@@ -1161,12 +1156,6 @@ export class VM {
 						"decl type must be VariableDeclarator",
 					);
 					if (decl.id.type === "Identifier") {
-						console.log(
-							"declare variable",
-							decl.id.name,
-							"scope",
-							this.currentScope!.ID,
-						);
 						if (decl.init === undefined || decl.init === null) {
 							continue;
 						}
@@ -1240,56 +1229,51 @@ export class VM {
 
 			case "ForInStatement": {
 				const iteree = this.evalExpr(stmt.right);
-				return this.nestScope(() => {
-					assert(iteree instanceof VMObject, "only supported: object iteree");
-					const properties = iteree.getOwnEnumerablePropertyNames();
-					for (const name of properties) {
-						// a new scope is created at each iteration, so that the iteration variable is
-						// distinct (different identity) at each cycle.
-						this.nestScope(() => {
-							let asmtTarget: acorn.Pattern;
 
-							if (stmt.left.type === "VariableDeclaration") {
-								assert(
-									stmt.left.declarations.length === 1 &&
-										stmt.left.declarations[0].type === "VariableDeclarator" &&
-										stmt.left.declarations[0].init === null &&
-										stmt.left.declarations[0].id.type === "Identifier",
-									"only supported: single declaration with no init and a simple identifier as the pattern",
-								);
-								this.runStmt(stmt.left);
-								asmtTarget = stmt.left.declarations[0].id;
+				assert(iteree instanceof VMObject, "only supported: object iteree");
+				const properties = iteree.getOwnEnumerablePropertyNames();
+				for (const name of properties) {
+					// a new scope is created at each iteration, so that the iteration variable is
+					// distinct (different identity) at each cycle.
+					this.nestScope(() => {
+						this.doHoistedDeclarations(stmt);
+						let asmtTarget: acorn.Pattern;
 
-								assert(
-									this.currentScope!.lookupVar(asmtTarget, { noParent: true }),
-									"iteration variable got defined in the wrong scope",
-								);
-							} else if (stmt.left.type === "Identifier") {
-								asmtTarget = stmt.left;
-							} else {
-								throw new AssertionError(
-									`in for(...in...) statement: left-hand side syntax not supported: ${stmt.left.type}`,
-								);
-							}
+						if (stmt.left.type === "VariableDeclaration") {
+							assert(
+								stmt.left.declarations.length === 1 &&
+									stmt.left.declarations[0].type === "VariableDeclarator" &&
+									stmt.left.declarations[0].init === null &&
+									stmt.left.declarations[0].id.type === "Identifier",
+								"only supported: single declaration with no init and a simple identifier as the pattern",
+							);
+							this.runStmt(stmt.left);
+							asmtTarget = stmt.left.declarations[0].id;
+						} else if (stmt.left.type === "Identifier") {
+							asmtTarget = stmt.left;
+						} else {
+							throw new AssertionError(
+								`in for(...in...) statement: left-hand side syntax not supported: ${stmt.left.type}`,
+							);
+						}
 
-							let nameJSV: JSValue;
-							if (typeof name === "string") {
-								nameJSV = { type: "string", value: name };
-							} else if (typeof name === "symbol") {
-								nameJSV = { type: "symbol", value: name };
-							} else {
-								throw new AssertionError(
-									`getOwnPropertyNames must return string or symbol, not ${typeof name}`,
-								);
-							}
+						let nameJSV: JSValue;
+						if (typeof name === "string") {
+							nameJSV = { type: "string", value: name };
+						} else if (typeof name === "symbol") {
+							nameJSV = { type: "symbol", value: name };
+						} else {
+							throw new AssertionError(
+								`getOwnPropertyNames must return string or symbol, not ${typeof name}`,
+							);
+						}
 
-							this.doAssignment(asmtTarget, nameJSV);
-							this.runStmt(stmt.body);
-						});
-					}
+						this.doAssignment(asmtTarget, nameJSV);
+						this.runStmt(stmt.body);
+					});
+				}
 
-					return { type: "undefined" };
-				});
+				return { type: "undefined" };
 			}
 
 			case "WhileStatement": {
@@ -3756,12 +3740,7 @@ function hoistDeclarations(node: Node) {
 
 		switch (options.toTopOf) {
 			case "block": {
-				const anc = ancestors.findLast((anc) =>
-					anc.type === "BlockStatement" ||
-					anc.type === "SwitchStatement" ||
-					anc.type === "ForInStatement"
-				);
-				dest = anc ?? ancestors[0];
+				dest = ancestors[ancestors.length - 1];
 				break;
 			}
 
@@ -3776,23 +3755,12 @@ function hoistDeclarations(node: Node) {
 				));
 				// default: function-scoped declarations can also be hoisted simply to the script/module's toplevel scope
 				dest = anc?.body ?? ancestors[0];
-
 				break;
 			}
 
 			default:
 				throw new AssertionError();
 		}
-
-		assert(
-			dest.type === "Program" ||
-				dest.type === "BlockStatement" ||
-				dest.type === "ForInStatement" ||
-				dest.type === "SwitchStatement",
-			`invalid hoist destination (${dest.type})`,
-		);
-
-		console.log("hoist", name, "to", dest.type);
 
 		dest.bindings ??= new Map();
 		dest.functionDecls ??= [];

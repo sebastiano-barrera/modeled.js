@@ -625,15 +625,6 @@ interface LookupOptions {
 	noParent?: boolean;
 }
 
-type DeclKind = "var" | "let" | "const" | "function";
-
-function assertValidDeclKind(kind: string): asserts kind is DeclKind {
-	assert(
-		kind === "var" || kind === "let" || kind === "const" || kind === "function",
-		"`kind` must be one of: var, let, const, function",
-	);
-}
-
 class VarScope extends Scope {
 	vars = new Map<string, "TDZ" | JSValue | (() => JSValue)>();
 	dontOverride = new Set<string>();

@@ -6,6 +6,7 @@ const predicate = path => (
   (
     path.startsWith('test/language/function-code/') 
     || path.startsWith('test/language/block-scope/')
+    || path.startsWith('test/language/expressions/')
   )
   && (testMeta.testCases[path] || {}).features === undefined 
   && Math.random() < fraction

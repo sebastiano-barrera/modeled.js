@@ -1480,7 +1480,11 @@ export class VM {
 						propertyNode.type === "Property",
 						"node's type === 'Property'",
 					);
-					assert(propertyNode.method === false, "node's method === false");
+
+					// if propertyNode.method === true, the parser has already done the hard work
+					// for us: the function part of the syntax is already grouped into a dedicated
+					// FunctionExpression node, which we handle the same as the non-method syntax.
+
 					assert(
 						propertyNode.shorthand === false,
 						"node's shorthand === false",

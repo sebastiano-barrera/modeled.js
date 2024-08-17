@@ -784,7 +784,7 @@ class EnvScope extends Scope {
 const textOfSource = new Map<string, string>();
 
 export class VM {
-	globalObj: VMObject;
+	readonly globalObj: VMObject = new VMObject(null);
 	currentScope: Scope | null = null;
 	synCtx: Node[] = [];
 
@@ -795,7 +795,9 @@ export class VM {
 			assert(_CV === undefined, "nested VM execution!");
 			_CV = this;
 
-			this.globalObj = createGlobalObject();
+			// mostly constructors
+			initGlobalObject(this.globalObj);
+			// mostly (built-in) prototypes
 			initBuiltins(this.realm);
 		} finally {
 			_CV = undefined;
@@ -2710,9 +2712,17 @@ function nativeVMFunc(
 	innerImpl: NativeFunc,
 	options: NativeFuncOptions = {},
 ): VMInvokable {
-	// our way of saying: native functions don't have any real "lexical scope" to
-	// access
-	const parentScope = new VarScope();
+	assert(
+		_CV !== undefined,
+		"bug: no active VM (needed to access global object)",
+	);
+	// native VM functions access the current-at-time-of-creation scope like any other function.
+	const parentScope = _CV.currentScope ??
+		// no scope active (typical during built-ins initialization); we make a "good
+		// enough" EnvScope, equivalent to the one the VM is going to create at runtime,
+		// and that allows manipulating the same global object.
+		new EnvScope(_CV.globalObj);
+
 	return new class extends VMInvokable {
 		canConstruct = options.isConstructor ?? false;
 		// in innerImpl, `this` is the VMInvokable object
@@ -3074,9 +3084,7 @@ function initBuiltins(realm: Realm) {
 	);
 }
 
-function createGlobalObject() {
-	const G = new VMObject();
-
+function initGlobalObject(G: VMObject): void {
 	const consError = nativeVMFunc((vm, subject, args) => {
 		assertIsObject(vm, subject);
 		subject.setProperty("message", args[0]);
@@ -3649,8 +3657,6 @@ function createGlobalObject() {
 			prototype.setProperty("name", { type: "string", value: name });
 		}
 	}
-
-	return G;
 }
 
 function expressionToPattern(argument: acorn.Expression): acorn.Pattern {

@@ -1275,17 +1275,25 @@ export class VM {
 
 				case "WhileStatement": {
 					let completion: JSValue = { type: "undefined" };
-					try {
-						while (this.coerceToBoolean(this.evalExpr(stmt.test))) {
-							try {
-								completion = this.runStmt(stmt.body) ?? completion;
-							} catch (e) {
-								if (!e.continue) throw e;
-							}
+					while (this.coerceToBoolean(this.evalExpr(stmt.test))) {
+						try {
+							completion = this.runStmt(stmt.body) ?? completion;
+						} catch (e) {
+							if (!e.continue) throw e;
 						}
-					} catch (e) {
-						if (!e.break) throw e;
 					}
+					return completion;
+				}
+
+				case "DoWhileStatement": {
+					let completion: JSValue = { type: "undefined" };
+					do {
+						try {
+							completion = this.runStmt(stmt.body) ?? completion;
+						} catch (e) {
+							if (!e.continue) throw e;
+						}
+					} while (this.coerceToBoolean(this.evalExpr(stmt.test)));
 					return completion;
 				}
 

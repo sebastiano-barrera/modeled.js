@@ -1360,7 +1360,18 @@ export class VM {
 		params: acorn.Pattern[];
 		body: Node;
 		id?: acorn.Identifier | null;
+		async?: boolean;
+		generator?: boolean;
 	}): VMFunction {
+		assert(
+			(declNode.async ?? false) === false,
+			"async functions not supported",
+		);
+		assert(
+			(declNode.generator ?? false) === false,
+			"generator functions not supported",
+		);
+
 		const func = this.makeFunction(declNode.params, declNode.body);
 
 		const consFunction = this.globalObj.getProperty("Function");
@@ -1876,6 +1887,17 @@ export class VM {
 				}
 				return this.evalExpr(expr.expressions[expr.expressions.length - 1]);
 
+			case "ArrowFunctionExpression": {
+				// similar to Object.prototype.bind
+				assert(this.currentScope !== null, "there must be a scope");
+				const outerThis = this.currentScope.getThisValue(this.globalObj);
+				const func = this.defineFunction(expr);
+				return nativeVMFunc((vm: VM, _: JSValue, args: JSValue[]) => {
+					// force subject to be this inner subject passed here
+					return func.invoke(vm, outerThis, args);
+				});
+			}
+
 			default:
 				throw new AssertionError(
 					`unsupported expression node type: ${expr.type}`,
@@ -2173,17 +2195,41 @@ export class VM {
 		// I'm telling TypeScript to trust me on the bodyNode being BlockStatement,
 		// and then AFTERWARDS trying to run enough asserts to convince myself that I
 		// haven't lied to the compiler.
-		const bodyBlock = <acorn.BlockStatement> bodyNode;
+		let bodyBlock: acorn.BlockStatement;
+		if (bodyNode.type === "BlockStatement") {
+			bodyBlock = <acorn.BlockStatement> bodyNode;
+		} else {
+			// lol
+			assert(
+				bodyNode.type.endsWith("Expression") ||
+					bodyNode.type === "Identifier",
+				() =>
+					`function body must be BlockStatement or an expression, not ${bodyNode.type}`,
+			);
+			bodyBlock = {
+				type: "BlockStatement",
+				start: bodyNode.start,
+				end: bodyNode.end,
+				body: [
+					{
+						type: "ReturnStatement",
+						start: bodyNode.start,
+						end: bodyNode.end,
+						argument: <acorn.Expression> bodyNode,
+					},
+				],
+			};
+		}
+
 		assert(
 			bodyBlock.type === "BlockStatement",
-			"only supported: BlockStatement as function body",
+			"function body must be a BlockStatement",
 		);
 		assert(
 			bodyBlock.body !== undefined && Array.isArray(bodyBlock.body),
 			"function body not a BlockStatement? invalid `body` property",
 		);
 		assert(this.currentScope !== null, "there must be a scope");
-
 		const func = new VMFunction(params, bodyBlock, this.currentScope);
 		if (!options.scopeStrictnessIrrelevant && this.currentScope.isStrict()) {
 			func.isStrict = true;

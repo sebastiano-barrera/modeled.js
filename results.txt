@@ -1,0 +1,285 @@
+ ... running /home/sebastiano/src/test262/test/language/expressions/arrow-function/ArrowFunction_restricted-properties.js
+ ... running /home/sebastiano/src/test262/test/language/expressions/arrow-function/arrow/binding-tests-1.js
+ ... running /home/sebastiano/src/test262/test/language/expressions/arrow-function/arrow/binding-tests-2.js
+ ... running /home/sebastiano/src/test262/test/language/expressions/arrow-function/arrow/binding-tests-3.js
+ ... running /home/sebastiano/src/test262/test/language/expressions/arrow-function/arrow/capturing-closure-variables-1.js
+ ... running /home/sebastiano/src/test262/test/language/expressions/arrow-function/arrow/capturing-closure-variables-2.js
+ ... running /home/sebastiano/src/test262/test/language/expressions/arrow-function/arrow/concisebody-lookahead-assignmentexpression-1.js
+ ... running /home/sebastiano/src/test262/test/language/expressions/arrow-function/arrow/concisebody-lookahead-assignmentexpression-2.js
+ ... running /home/sebastiano/src/test262/test/language/expressions/arrow-function/cannot-override-this-with-thisArg.js
+ ... running /home/sebastiano/src/test262/test/language/expressions/arrow-function/dflt-params-trailing-comma.js
+ ... running /home/sebastiano/src/test262/test/language/expressions/arrow-function/empty-function-body-returns-undefined.js
+ ... running /home/sebastiano/src/test262/test/language/expressions/arrow-function/expression-body-implicit-return.js
+ ... running /home/sebastiano/src/test262/test/language/expressions/arrow-function/extensibility.js
+ ... running /home/sebastiano/src/test262/test/language/expressions/arrow-function/lexical-arguments.js
+ ... running /home/sebastiano/src/test262/test/language/expressions/arrow-function/lexical-bindings-overriden-by-formal-parameters-non-strict.js
+ ... running /home/sebastiano/src/test262/test/language/expressions/arrow-function/lexical-super-call-from-within-constructor.js
+ ... running /home/sebastiano/src/test262/test/language/expressions/arrow-function/lexical-super-property-from-within-constructor.js
+ ... running /home/sebastiano/src/test262/test/language/expressions/arrow-function/lexical-super-property.js
+ ... running /home/sebastiano/src/test262/test/language/expressions/arrow-function/lexical-supercall-from-immediately-invoked-arrow.js
+ ... running /home/sebastiano/src/test262/test/language/expressions/arrow-function/lexical-this.js
+ ... running /home/sebastiano/src/test262/test/language/expressions/arrow-function/low-precedence-expression-body-no-parens.js
+ ... running /home/sebastiano/src/test262/test/language/expressions/arrow-function/name.js
+ ... running /home/sebastiano/src/test262/test/language/expressions/arrow-function/non-strict.js
+ ... running /home/sebastiano/src/test262/test/language/expressions/arrow-function/object-literal-return-requires-body-parens.js
+ ... running /home/sebastiano/src/test262/test/language/expressions/arrow-function/params-duplicate.js
+ ... running /home/sebastiano/src/test262/test/language/expressions/arrow-function/params-trailing-comma-multiple.js
+ ... running /home/sebastiano/src/test262/test/language/expressions/arrow-function/params-trailing-comma-single.js
+ ... running /home/sebastiano/src/test262/test/language/expressions/arrow-function/prototype-rules.js
+ ... running /home/sebastiano/src/test262/test/language/expressions/arrow-function/rest-params-trailing-comma-early-error.js
+ ... running /home/sebastiano/src/test262/test/language/expressions/arrow-function/scope-param-elem-var-close.js
+ ... running /home/sebastiano/src/test262/test/language/expressions/arrow-function/scope-param-elem-var-open.js
+ ... running /home/sebastiano/src/test262/test/language/expressions/arrow-function/scope-param-rest-elem-var-close.js
+ ... running /home/sebastiano/src/test262/test/language/expressions/arrow-function/scope-param-rest-elem-var-open.js
+ ... running /home/sebastiano/src/test262/test/language/expressions/arrow-function/scope-paramsbody-var-close.js
+ ... running /home/sebastiano/src/test262/test/language/expressions/arrow-function/scope-paramsbody-var-open.js
+ ... running /home/sebastiano/src/test262/test/language/expressions/arrow-function/statement-body-requires-braces-must-return-explicitly-missing.js
+ ... running /home/sebastiano/src/test262/test/language/expressions/arrow-function/statement-body-requires-braces-must-return-explicitly.js
+ ... running /home/sebastiano/src/test262/test/language/expressions/arrow-function/strict.js
+ ... running /home/sebastiano/src/test262/test/language/expressions/arrow-function/syntax/arrowparameters-bindingidentifier-arguments.js
+ ... running /home/sebastiano/src/test262/test/language/expressions/arrow-function/syntax/arrowparameters-bindingidentifier-concisebody-assignmentexpression.js
+ ... running /home/sebastiano/src/test262/test/language/expressions/arrow-function/syntax/arrowparameters-bindingidentifier-concisebody-functionbody.js
+ ... running /home/sebastiano/src/test262/test/language/expressions/arrow-function/syntax/arrowparameters-bindingidentifier-eval.js
+ ... running /home/sebastiano/src/test262/test/language/expressions/arrow-function/syntax/arrowparameters-bindingidentifier-lineterminator-concisebody-assignmentexpression.js
+ ... running /home/sebastiano/src/test262/test/language/expressions/arrow-function/syntax/arrowparameters-bindingidentifier-lineterminator-concisebody-functionbody.js
+ ... running /home/sebastiano/src/test262/test/language/expressions/arrow-function/syntax/arrowparameters-bindingidentifier-yield.js
+ ... running /home/sebastiano/src/test262/test/language/expressions/arrow-function/syntax/arrowparameters-cover-concisebody-assignmentexpression.js
+ ... running /home/sebastiano/src/test262/test/language/expressions/arrow-function/syntax/arrowparameters-cover-concisebody-functionbody.js
+ ... running /home/sebastiano/src/test262/test/language/expressions/arrow-function/syntax/arrowparameters-cover-formalparameters-arguments.js
+ ... running /home/sebastiano/src/test262/test/language/expressions/arrow-function/syntax/arrowparameters-cover-formalparameters-eval.js
+ ... running /home/sebastiano/src/test262/test/language/expressions/arrow-function/syntax/arrowparameters-cover-formalparameters-yield.js
+ ... running /home/sebastiano/src/test262/test/language/expressions/arrow-function/syntax/arrowparameters-cover-includes-rest-concisebody-functionbody.js
+ ... running /home/sebastiano/src/test262/test/language/expressions/arrow-function/syntax/arrowparameters-cover-initialize-1.js
+ ... running /home/sebastiano/src/test262/test/language/expressions/arrow-function/syntax/arrowparameters-cover-initialize-2.js
+ ... running /home/sebastiano/src/test262/test/language/expressions/arrow-function/syntax/arrowparameters-cover-lineterminator-concisebody-assignmentexpression.js
+ ... running /home/sebastiano/src/test262/test/language/expressions/arrow-function/syntax/arrowparameters-cover-lineterminator-concisebody-functionbody.js
+ ... running /home/sebastiano/src/test262/test/language/expressions/arrow-function/syntax/arrowparameters-cover-rest-concisebody-functionbody.js
+ ... running /home/sebastiano/src/test262/test/language/expressions/arrow-function/syntax/arrowparameters-cover-rest-lineterminator-concisebody-functionbody.js
+ ... running /home/sebastiano/src/test262/test/language/expressions/arrow-function/syntax/early-errors/arrowparameters-bindingidentifier-identifier-futurereservedword.js
+ ... running /home/sebastiano/src/test262/test/language/expressions/arrow-function/syntax/early-errors/arrowparameters-bindingidentifier-identifier-strict-futurereservedword.js
+ ... running /home/sebastiano/src/test262/test/language/expressions/arrow-function/syntax/early-errors/arrowparameters-bindingidentifier-identifier.js
+ ... running /home/sebastiano/src/test262/test/language/expressions/arrow-function/syntax/early-errors/arrowparameters-bindingidentifier-no-arguments.js
+ ... running /home/sebastiano/src/test262/test/language/expressions/arrow-function/syntax/early-errors/arrowparameters-bindingidentifier-no-eval.js
+ ... running /home/sebastiano/src/test262/test/language/expressions/arrow-function/syntax/early-errors/arrowparameters-bindingidentifier-no-yield.js
+ ... running /home/sebastiano/src/test262/test/language/expressions/arrow-function/syntax/early-errors/arrowparameters-bindingidentifier-rest.js
+ ... running /home/sebastiano/src/test262/test/language/expressions/arrow-function/syntax/early-errors/arrowparameters-cover-no-arguments.js
+ ... running /home/sebastiano/src/test262/test/language/expressions/arrow-function/syntax/early-errors/arrowparameters-cover-no-duplicates-binding-array-1.js
+ ... running /home/sebastiano/src/test262/test/language/expressions/arrow-function/syntax/early-errors/arrowparameters-cover-no-duplicates-binding-array-2.js
+ ... running /home/sebastiano/src/test262/test/language/expressions/arrow-function/syntax/early-errors/arrowparameters-cover-no-duplicates-binding-array-3.js
+ ... running /home/sebastiano/src/test262/test/language/expressions/arrow-function/syntax/early-errors/arrowparameters-cover-no-duplicates-binding-object-1.js
+ ... running /home/sebastiano/src/test262/test/language/expressions/arrow-function/syntax/early-errors/arrowparameters-cover-no-duplicates-binding-object-2.js
+ ... running /home/sebastiano/src/test262/test/language/expressions/arrow-function/syntax/early-errors/arrowparameters-cover-no-duplicates-binding-object-3.js
+ ... running /home/sebastiano/src/test262/test/language/expressions/arrow-function/syntax/early-errors/arrowparameters-cover-no-duplicates-binding-object-4.js
+ ... running /home/sebastiano/src/test262/test/language/expressions/arrow-function/syntax/early-errors/arrowparameters-cover-no-duplicates-binding-object-5.js
+ ... running /home/sebastiano/src/test262/test/language/expressions/arrow-function/syntax/early-errors/arrowparameters-cover-no-duplicates-binding-object-6.js
+ ... running /home/sebastiano/src/test262/test/language/expressions/arrow-function/syntax/early-errors/arrowparameters-cover-no-duplicates-rest.js
+ ... running /home/sebastiano/src/test262/test/language/expressions/arrow-function/syntax/early-errors/arrowparameters-cover-no-duplicates.js
+ ... running /home/sebastiano/src/test262/test/language/expressions/arrow-function/syntax/early-errors/arrowparameters-cover-no-eval.js
+ ... running /home/sebastiano/src/test262/test/language/expressions/arrow-function/syntax/early-errors/arrowparameters-cover-no-yield.js
+ ... running /home/sebastiano/src/test262/test/language/expressions/arrow-function/syntax/early-errors/asi-restriction-invalid-parenless-parameters-expression-body.js
+ ... running /home/sebastiano/src/test262/test/language/expressions/arrow-function/syntax/early-errors/asi-restriction-invalid-parenless-parameters.js
+ ... running /home/sebastiano/src/test262/test/language/expressions/arrow-function/syntax/early-errors/asi-restriction-invalid.js
+ ... running /home/sebastiano/src/test262/test/language/expressions/arrow-function/syntax/early-errors/use-strict-with-non-simple-param.js
+ ... running /home/sebastiano/src/test262/test/language/expressions/arrow-function/syntax/variations.js
+ ... running /home/sebastiano/src/test262/test/language/expressions/arrow-function/throw-new.js
+92 successes:
+ - /home/sebastiano/src/test262/test/language/expressions/arrow-function/arrow/binding-tests-1.js
+ - /home/sebastiano/src/test262/test/language/expressions/arrow-function/arrow/binding-tests-2.js
+ - /home/sebastiano/src/test262/test/language/expressions/arrow-function/arrow/binding-tests-3.js
+ - /home/sebastiano/src/test262/test/language/expressions/arrow-function/arrow/capturing-closure-variables-1.js
+ - /home/sebastiano/src/test262/test/language/expressions/arrow-function/arrow/capturing-closure-variables-1.js
+ - /home/sebastiano/src/test262/test/language/expressions/arrow-function/arrow/concisebody-lookahead-assignmentexpression-1.js
+ - /home/sebastiano/src/test262/test/language/expressions/arrow-function/arrow/concisebody-lookahead-assignmentexpression-1.js
+ - /home/sebastiano/src/test262/test/language/expressions/arrow-function/arrow/concisebody-lookahead-assignmentexpression-2.js
+ - /home/sebastiano/src/test262/test/language/expressions/arrow-function/arrow/concisebody-lookahead-assignmentexpression-2.js
+ - /home/sebastiano/src/test262/test/language/expressions/arrow-function/empty-function-body-returns-undefined.js
+ - /home/sebastiano/src/test262/test/language/expressions/arrow-function/empty-function-body-returns-undefined.js
+ - /home/sebastiano/src/test262/test/language/expressions/arrow-function/expression-body-implicit-return.js
+ - /home/sebastiano/src/test262/test/language/expressions/arrow-function/expression-body-implicit-return.js
+ - /home/sebastiano/src/test262/test/language/expressions/arrow-function/lexical-this.js
+ - /home/sebastiano/src/test262/test/language/expressions/arrow-function/lexical-this.js
+ - /home/sebastiano/src/test262/test/language/expressions/arrow-function/low-precedence-expression-body-no-parens.js
+ - /home/sebastiano/src/test262/test/language/expressions/arrow-function/low-precedence-expression-body-no-parens.js
+ - /home/sebastiano/src/test262/test/language/expressions/arrow-function/non-strict.js
+ - /home/sebastiano/src/test262/test/language/expressions/arrow-function/object-literal-return-requires-body-parens.js
+ - /home/sebastiano/src/test262/test/language/expressions/arrow-function/object-literal-return-requires-body-parens.js
+ - /home/sebastiano/src/test262/test/language/expressions/arrow-function/params-duplicate.js
+ - /home/sebastiano/src/test262/test/language/expressions/arrow-function/params-duplicate.js
+ - /home/sebastiano/src/test262/test/language/expressions/arrow-function/rest-params-trailing-comma-early-error.js
+ - /home/sebastiano/src/test262/test/language/expressions/arrow-function/rest-params-trailing-comma-early-error.js
+ - /home/sebastiano/src/test262/test/language/expressions/arrow-function/statement-body-requires-braces-must-return-explicitly-missing.js
+ - /home/sebastiano/src/test262/test/language/expressions/arrow-function/statement-body-requires-braces-must-return-explicitly-missing.js
+ - /home/sebastiano/src/test262/test/language/expressions/arrow-function/statement-body-requires-braces-must-return-explicitly.js
+ - /home/sebastiano/src/test262/test/language/expressions/arrow-function/statement-body-requires-braces-must-return-explicitly.js
+ - /home/sebastiano/src/test262/test/language/expressions/arrow-function/strict.js
+ - /home/sebastiano/src/test262/test/language/expressions/arrow-function/syntax/arrowparameters-bindingidentifier-concisebody-assignmentexpression.js
+ - /home/sebastiano/src/test262/test/language/expressions/arrow-function/syntax/arrowparameters-bindingidentifier-concisebody-assignmentexpression.js
+ - /home/sebastiano/src/test262/test/language/expressions/arrow-function/syntax/arrowparameters-bindingidentifier-concisebody-functionbody.js
+ - /home/sebastiano/src/test262/test/language/expressions/arrow-function/syntax/arrowparameters-bindingidentifier-concisebody-functionbody.js
+ - /home/sebastiano/src/test262/test/language/expressions/arrow-function/syntax/arrowparameters-bindingidentifier-eval.js
+ - /home/sebastiano/src/test262/test/language/expressions/arrow-function/syntax/arrowparameters-bindingidentifier-lineterminator-concisebody-assignmentexpression.js
+ - /home/sebastiano/src/test262/test/language/expressions/arrow-function/syntax/arrowparameters-bindingidentifier-lineterminator-concisebody-assignmentexpression.js
+ - /home/sebastiano/src/test262/test/language/expressions/arrow-function/syntax/arrowparameters-bindingidentifier-lineterminator-concisebody-functionbody.js
+ - /home/sebastiano/src/test262/test/language/expressions/arrow-function/syntax/arrowparameters-bindingidentifier-lineterminator-concisebody-functionbody.js
+ - /home/sebastiano/src/test262/test/language/expressions/arrow-function/syntax/arrowparameters-cover-concisebody-assignmentexpression.js
+ - /home/sebastiano/src/test262/test/language/expressions/arrow-function/syntax/arrowparameters-cover-concisebody-assignmentexpression.js
+ - /home/sebastiano/src/test262/test/language/expressions/arrow-function/syntax/arrowparameters-cover-concisebody-functionbody.js
+ - /home/sebastiano/src/test262/test/language/expressions/arrow-function/syntax/arrowparameters-cover-concisebody-functionbody.js
+ - /home/sebastiano/src/test262/test/language/expressions/arrow-function/syntax/arrowparameters-cover-formalparameters-eval.js
+ - /home/sebastiano/src/test262/test/language/expressions/arrow-function/syntax/arrowparameters-cover-lineterminator-concisebody-assignmentexpression.js
+ - /home/sebastiano/src/test262/test/language/expressions/arrow-function/syntax/arrowparameters-cover-lineterminator-concisebody-assignmentexpression.js
+ - /home/sebastiano/src/test262/test/language/expressions/arrow-function/syntax/arrowparameters-cover-lineterminator-concisebody-functionbody.js
+ - /home/sebastiano/src/test262/test/language/expressions/arrow-function/syntax/arrowparameters-cover-lineterminator-concisebody-functionbody.js
+ - /home/sebastiano/src/test262/test/language/expressions/arrow-function/syntax/early-errors/arrowparameters-bindingidentifier-identifier-futurereservedword.js
+ - /home/sebastiano/src/test262/test/language/expressions/arrow-function/syntax/early-errors/arrowparameters-bindingidentifier-identifier-futurereservedword.js
+ - /home/sebastiano/src/test262/test/language/expressions/arrow-function/syntax/early-errors/arrowparameters-bindingidentifier-identifier-strict-futurereservedword.js
+ - /home/sebastiano/src/test262/test/language/expressions/arrow-function/syntax/early-errors/arrowparameters-bindingidentifier-identifier.js
+ - /home/sebastiano/src/test262/test/language/expressions/arrow-function/syntax/early-errors/arrowparameters-bindingidentifier-identifier.js
+ - /home/sebastiano/src/test262/test/language/expressions/arrow-function/syntax/early-errors/arrowparameters-bindingidentifier-no-arguments.js
+ - /home/sebastiano/src/test262/test/language/expressions/arrow-function/syntax/early-errors/arrowparameters-bindingidentifier-no-eval.js
+ - /home/sebastiano/src/test262/test/language/expressions/arrow-function/syntax/early-errors/arrowparameters-bindingidentifier-no-yield.js
+ - /home/sebastiano/src/test262/test/language/expressions/arrow-function/syntax/early-errors/arrowparameters-bindingidentifier-rest.js
+ - /home/sebastiano/src/test262/test/language/expressions/arrow-function/syntax/early-errors/arrowparameters-bindingidentifier-rest.js
+ - /home/sebastiano/src/test262/test/language/expressions/arrow-function/syntax/early-errors/arrowparameters-cover-no-arguments.js
+ - /home/sebastiano/src/test262/test/language/expressions/arrow-function/syntax/early-errors/arrowparameters-cover-no-duplicates-binding-array-1.js
+ - /home/sebastiano/src/test262/test/language/expressions/arrow-function/syntax/early-errors/arrowparameters-cover-no-duplicates-binding-array-1.js
+ - /home/sebastiano/src/test262/test/language/expressions/arrow-function/syntax/early-errors/arrowparameters-cover-no-duplicates-binding-array-2.js
+ - /home/sebastiano/src/test262/test/language/expressions/arrow-function/syntax/early-errors/arrowparameters-cover-no-duplicates-binding-array-2.js
+ - /home/sebastiano/src/test262/test/language/expressions/arrow-function/syntax/early-errors/arrowparameters-cover-no-duplicates-binding-array-3.js
+ - /home/sebastiano/src/test262/test/language/expressions/arrow-function/syntax/early-errors/arrowparameters-cover-no-duplicates-binding-array-3.js
+ - /home/sebastiano/src/test262/test/language/expressions/arrow-function/syntax/early-errors/arrowparameters-cover-no-duplicates-binding-object-1.js
+ - /home/sebastiano/src/test262/test/language/expressions/arrow-function/syntax/early-errors/arrowparameters-cover-no-duplicates-binding-object-1.js
+ - /home/sebastiano/src/test262/test/language/expressions/arrow-function/syntax/early-errors/arrowparameters-cover-no-duplicates-binding-object-2.js
+ - /home/sebastiano/src/test262/test/language/expressions/arrow-function/syntax/early-errors/arrowparameters-cover-no-duplicates-binding-object-2.js
+ - /home/sebastiano/src/test262/test/language/expressions/arrow-function/syntax/early-errors/arrowparameters-cover-no-duplicates-binding-object-3.js
+ - /home/sebastiano/src/test262/test/language/expressions/arrow-function/syntax/early-errors/arrowparameters-cover-no-duplicates-binding-object-3.js
+ - /home/sebastiano/src/test262/test/language/expressions/arrow-function/syntax/early-errors/arrowparameters-cover-no-duplicates-binding-object-4.js
+ - /home/sebastiano/src/test262/test/language/expressions/arrow-function/syntax/early-errors/arrowparameters-cover-no-duplicates-binding-object-4.js
+ - /home/sebastiano/src/test262/test/language/expressions/arrow-function/syntax/early-errors/arrowparameters-cover-no-duplicates-binding-object-5.js
+ - /home/sebastiano/src/test262/test/language/expressions/arrow-function/syntax/early-errors/arrowparameters-cover-no-duplicates-binding-object-5.js
+ - /home/sebastiano/src/test262/test/language/expressions/arrow-function/syntax/early-errors/arrowparameters-cover-no-duplicates-binding-object-6.js
+ - /home/sebastiano/src/test262/test/language/expressions/arrow-function/syntax/early-errors/arrowparameters-cover-no-duplicates-binding-object-6.js
+ - /home/sebastiano/src/test262/test/language/expressions/arrow-function/syntax/early-errors/arrowparameters-cover-no-duplicates-rest.js
+ - /home/sebastiano/src/test262/test/language/expressions/arrow-function/syntax/early-errors/arrowparameters-cover-no-duplicates-rest.js
+ - /home/sebastiano/src/test262/test/language/expressions/arrow-function/syntax/early-errors/arrowparameters-cover-no-duplicates.js
+ - /home/sebastiano/src/test262/test/language/expressions/arrow-function/syntax/early-errors/arrowparameters-cover-no-duplicates.js
+ - /home/sebastiano/src/test262/test/language/expressions/arrow-function/syntax/early-errors/arrowparameters-cover-no-eval.js
+ - /home/sebastiano/src/test262/test/language/expressions/arrow-function/syntax/early-errors/arrowparameters-cover-no-yield.js
+ - /home/sebastiano/src/test262/test/language/expressions/arrow-function/syntax/early-errors/asi-restriction-invalid-parenless-parameters-expression-body.js
+ - /home/sebastiano/src/test262/test/language/expressions/arrow-function/syntax/early-errors/asi-restriction-invalid-parenless-parameters-expression-body.js
+ - /home/sebastiano/src/test262/test/language/expressions/arrow-function/syntax/early-errors/asi-restriction-invalid-parenless-parameters.js
+ - /home/sebastiano/src/test262/test/language/expressions/arrow-function/syntax/early-errors/asi-restriction-invalid-parenless-parameters.js
+ - /home/sebastiano/src/test262/test/language/expressions/arrow-function/syntax/early-errors/asi-restriction-invalid.js
+ - /home/sebastiano/src/test262/test/language/expressions/arrow-function/syntax/early-errors/asi-restriction-invalid.js
+ - /home/sebastiano/src/test262/test/language/expressions/arrow-function/syntax/early-errors/use-strict-with-non-simple-param.js
+ - /home/sebastiano/src/test262/test/language/expressions/arrow-function/syntax/early-errors/use-strict-with-non-simple-param.js
+ - /home/sebastiano/src/test262/test/language/expressions/arrow-function/throw-new.js
+ - /home/sebastiano/src/test262/test/language/expressions/arrow-function/throw-new.js
+0 skipped:
+
+52 failures:
+case	/home/sebastiano/src/test262/test/language/expressions/arrow-function/ArrowFunction_restricted-properties.js
+error	Error: interpreted js program exception: Expected a TypeError to be thrown but no exception was thrown at all
+case	/home/sebastiano/src/test262/test/language/expressions/arrow-function/ArrowFunction_restricted-properties.js
+error	Error: interpreted js program exception: Expected a TypeError to be thrown but no exception was thrown at all
+case	/home/sebastiano/src/test262/test/language/expressions/arrow-function/arrow/capturing-closure-variables-2.js
+error	Error: not a (supported) statement: WithStatement
+case	/home/sebastiano/src/test262/test/language/expressions/arrow-function/cannot-override-this-with-thisArg.js
+error	Error: interpreted js program exception: callee must be callable, not undefined
+case	/home/sebastiano/src/test262/test/language/expressions/arrow-function/cannot-override-this-with-thisArg.js
+error	Error: interpreted js program exception: callee must be callable, not undefined
+case	/home/sebastiano/src/test262/test/language/expressions/arrow-function/dflt-params-trailing-comma.js
+error	Error: assertion failed: unsupported: func params of type AssignmentPattern
+case	/home/sebastiano/src/test262/test/language/expressions/arrow-function/dflt-params-trailing-comma.js
+error	Error: assertion failed: unsupported: func params of type AssignmentPattern
+case	/home/sebastiano/src/test262/test/language/expressions/arrow-function/extensibility.js
+error	Error: interpreted js program exception: callee must be callable, not undefined
+case	/home/sebastiano/src/test262/test/language/expressions/arrow-function/extensibility.js
+error	Error: interpreted js program exception: callee must be callable, not undefined
+case	/home/sebastiano/src/test262/test/language/expressions/arrow-function/lexical-arguments.js
+error	Error: interpreted js program exception: Expected true but got false
+case	/home/sebastiano/src/test262/test/language/expressions/arrow-function/lexical-arguments.js
+error	Error: interpreted js program exception: Expected true but got false
+case	/home/sebastiano/src/test262/test/language/expressions/arrow-function/lexical-bindings-overriden-by-formal-parameters-non-strict.js
+error	Error: interpreted js program exception: Expected SameValue(«[object Object]», «2») to be true
+case	/home/sebastiano/src/test262/test/language/expressions/arrow-function/lexical-super-call-from-within-constructor.js
+error	Error: not a (supported) statement: ClassDeclaration
+case	/home/sebastiano/src/test262/test/language/expressions/arrow-function/lexical-super-call-from-within-constructor.js
+error	Error: not a (supported) statement: ClassDeclaration
+case	/home/sebastiano/src/test262/test/language/expressions/arrow-function/lexical-super-property-from-within-constructor.js
+error	Error: not a (supported) statement: ClassDeclaration
+case	/home/sebastiano/src/test262/test/language/expressions/arrow-function/lexical-super-property-from-within-constructor.js
+error	Error: not a (supported) statement: ClassDeclaration
+case	/home/sebastiano/src/test262/test/language/expressions/arrow-function/lexical-super-property.js
+error	Error: not a (supported) statement: ClassDeclaration
+case	/home/sebastiano/src/test262/test/language/expressions/arrow-function/lexical-super-property.js
+error	Error: not a (supported) statement: ClassDeclaration
+case	/home/sebastiano/src/test262/test/language/expressions/arrow-function/lexical-supercall-from-immediately-invoked-arrow.js
+error	Error: not a (supported) statement: ClassDeclaration
+case	/home/sebastiano/src/test262/test/language/expressions/arrow-function/lexical-supercall-from-immediately-invoked-arrow.js
+error	Error: not a (supported) statement: ClassDeclaration
+case	/home/sebastiano/src/test262/test/language/expressions/arrow-function/name.js
+error	Error: interpreted js program exception: obj should have an own property name
+case	/home/sebastiano/src/test262/test/language/expressions/arrow-function/name.js
+error	Error: interpreted js program exception: obj should have an own property name
+case	/home/sebastiano/src/test262/test/language/expressions/arrow-function/params-trailing-comma-multiple.js
+error	Error: interpreted js program exception: length is properly set Expected SameValue(«», «2») to be true
+case	/home/sebastiano/src/test262/test/language/expressions/arrow-function/params-trailing-comma-multiple.js
+error	Error: interpreted js program exception: length is properly set Expected SameValue(«», «2») to be true
+case	/home/sebastiano/src/test262/test/language/expressions/arrow-function/params-trailing-comma-single.js
+error	Error: interpreted js program exception: length is properly set Expected SameValue(«», «1») to be true
+case	/home/sebastiano/src/test262/test/language/expressions/arrow-function/params-trailing-comma-single.js
+error	Error: interpreted js program exception: length is properly set Expected SameValue(«», «1») to be true
+case	/home/sebastiano/src/test262/test/language/expressions/arrow-function/prototype-rules.js
+error	Error: interpreted js program exception: Expected SameValue(«true», «false») to be true
+case	/home/sebastiano/src/test262/test/language/expressions/arrow-function/prototype-rules.js
+error	Error: interpreted js program exception: Expected SameValue(«true», «false») to be true
+case	/home/sebastiano/src/test262/test/language/expressions/arrow-function/scope-param-elem-var-close.js
+error	Error: assertion failed: unsupported: func params of type AssignmentPattern
+case	/home/sebastiano/src/test262/test/language/expressions/arrow-function/scope-param-elem-var-open.js
+error	Error: assertion failed: unsupported: func params of type AssignmentPattern
+case	/home/sebastiano/src/test262/test/language/expressions/arrow-function/scope-param-rest-elem-var-close.js
+error	Error: assertion failed: unsupported: func params of type RestElement
+case	/home/sebastiano/src/test262/test/language/expressions/arrow-function/scope-param-rest-elem-var-open.js
+error	Error: assertion failed: unsupported: func params of type AssignmentPattern
+case	/home/sebastiano/src/test262/test/language/expressions/arrow-function/scope-paramsbody-var-close.js
+error	Error: assertion failed: unsupported: func params of type AssignmentPattern
+case	/home/sebastiano/src/test262/test/language/expressions/arrow-function/scope-paramsbody-var-close.js
+error	Error: assertion failed: unsupported: func params of type AssignmentPattern
+case	/home/sebastiano/src/test262/test/language/expressions/arrow-function/scope-paramsbody-var-open.js
+error	Error: assertion failed: unsupported: func params of type AssignmentPattern
+case	/home/sebastiano/src/test262/test/language/expressions/arrow-function/scope-paramsbody-var-open.js
+error	Error: assertion failed: unsupported: func params of type AssignmentPattern
+case	/home/sebastiano/src/test262/test/language/expressions/arrow-function/syntax/arrowparameters-bindingidentifier-arguments.js
+error	Error: interpreted js program exception: Expected SameValue(«[object Object]», «1») to be true
+case	/home/sebastiano/src/test262/test/language/expressions/arrow-function/syntax/arrowparameters-bindingidentifier-yield.js
+error	Error: assertion failed: function body must be BlockStatement or an expression, not Literal
+case	/home/sebastiano/src/test262/test/language/expressions/arrow-function/syntax/arrowparameters-cover-formalparameters-arguments.js
+error	Error: interpreted js program exception: Expected SameValue(«[object Object]», «1») to be true
+case	/home/sebastiano/src/test262/test/language/expressions/arrow-function/syntax/arrowparameters-cover-formalparameters-yield.js
+error	Error: assertion failed: function body must be BlockStatement or an expression, not Literal
+case	/home/sebastiano/src/test262/test/language/expressions/arrow-function/syntax/arrowparameters-cover-includes-rest-concisebody-functionbody.js
+error	Error: assertion failed: unsupported: func params of type RestElement
+case	/home/sebastiano/src/test262/test/language/expressions/arrow-function/syntax/arrowparameters-cover-includes-rest-concisebody-functionbody.js
+error	Error: assertion failed: unsupported: func params of type RestElement
+case	/home/sebastiano/src/test262/test/language/expressions/arrow-function/syntax/arrowparameters-cover-initialize-1.js
+error	Error: assertion failed: unsupported: func params of type AssignmentPattern
+case	/home/sebastiano/src/test262/test/language/expressions/arrow-function/syntax/arrowparameters-cover-initialize-1.js
+error	Error: assertion failed: unsupported: func params of type AssignmentPattern
+case	/home/sebastiano/src/test262/test/language/expressions/arrow-function/syntax/arrowparameters-cover-initialize-2.js
+error	Error: assertion failed: unsupported: func params of type ObjectPattern
+case	/home/sebastiano/src/test262/test/language/expressions/arrow-function/syntax/arrowparameters-cover-initialize-2.js
+error	Error: assertion failed: unsupported: func params of type ObjectPattern
+case	/home/sebastiano/src/test262/test/language/expressions/arrow-function/syntax/arrowparameters-cover-rest-concisebody-functionbody.js
+error	Error: assertion failed: unsupported: func params of type RestElement
+case	/home/sebastiano/src/test262/test/language/expressions/arrow-function/syntax/arrowparameters-cover-rest-concisebody-functionbody.js
+error	Error: assertion failed: unsupported: func params of type RestElement
+case	/home/sebastiano/src/test262/test/language/expressions/arrow-function/syntax/arrowparameters-cover-rest-lineterminator-concisebody-functionbody.js
+error	Error: assertion failed: unsupported: func params of type RestElement
+case	/home/sebastiano/src/test262/test/language/expressions/arrow-function/syntax/arrowparameters-cover-rest-lineterminator-concisebody-functionbody.js
+error	Error: assertion failed: unsupported: func params of type RestElement
+case	/home/sebastiano/src/test262/test/language/expressions/arrow-function/syntax/variations.js
+error	Error: assertion failed: function body must be BlockStatement or an expression, not Literal
+case	/home/sebastiano/src/test262/test/language/expressions/arrow-function/syntax/variations.js
+error	Error: assertion failed: function body must be BlockStatement or an expression, not Literal
+summary: 92 successes; 0 skipped; 52 failures

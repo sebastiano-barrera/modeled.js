@@ -403,10 +403,9 @@ abstract class VMInvokable extends VMObject {
 	readonly type = "function";
 	isStrict = false;
 
-	params?: string[];
 	canConstruct: boolean = false;
 
-	constructor(public readonly declScope: Scope, consPrototype?: VMObject) {
+	constructor(public params: string[], public readonly declScope: Scope, consPrototype?: VMObject) {
 		super(R().PROTO_FUNCTION);
 		if (consPrototype === undefined) {
 			consPrototype = new VMObject();
@@ -494,7 +493,7 @@ class VMFunction extends VMInvokable {
 		public body: Node & acorn.BlockStatement,
 		public declScope: Scope,
 	) {
-		super(declScope);
+		super(params, declScope);
 	}
 
 	run(vm: VM, _subject: JSValue, _args: JSValue[]) {
@@ -2788,11 +2787,12 @@ function nativeVMFunc(
 		// and that allows manipulating the same global object.
 		new EnvScope(_CV.globalObj);
 
+	// empty parameters list (`innerImpl` instances unpack the arguments list manually, arguments aren't bound to names)
 	return new class extends VMInvokable {
 		canConstruct = options.isConstructor ?? false;
 		// in innerImpl, `this` is the VMInvokable object
 		run = innerImpl;
-	}(parentScope);
+	}([], parentScope);
 }
 
 interface FnBuildOptions {
@@ -3178,7 +3178,7 @@ function initGlobalObject(G: VMObject): void {
 			new class extends VMInvokable {
 				canConstruct = true;
 				constructor() {
-					super(new VarScope(), proto);
+					super([], new VarScope(), proto);
 				}
 				override run(
 					vm: VM,

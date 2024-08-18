@@ -3,13 +3,9 @@ import testMeta from './testMeta.json' with {type: 'json'};
 
 const fraction = 1.0
 const predicate = path => (
-  (
-    path.startsWith('test/language/expressions/arrow-function/') 
-    || path.startsWith('test/language/expressions/function/') 
-    || path.startsWith('test/language/function-code/') 
-  )
-  && (testMeta.testCases[path] || {}).features === undefined 
-  && Math.random() < fraction
+  !path.includes('class') && 
+  (testMeta.testCases[path]?.features ?? []).length === 0 && 
+  Math.random() < fraction
 );
 
 const filteredTestCases = []

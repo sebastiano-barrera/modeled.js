@@ -1,8 +1,10 @@
-- scoping rules (declaration hoisting, etc.)
-- function captures (don't these work already?)
-- "holey" arrays (empty, rather than undefined, elements)
-- patterns as assignment targets
-- patterns as function parameters
+- [...] scoping rules (declaration hoisting, etc.)
+- [ ] unify break/continue logic across different loop types (while, do while, for in, for, etc.) 
+	- furthermore: there is just one completion value for the whole eval. an inner loop can just write it and break across multiple loop 'layers', and it counts!
+- [ ] function captures (don't these work already?)
+- [ ] "holey" arrays (empty, rather than undefined, elements)
+- [ ] patterns as assignment targets
+- [ ] patterns as function parameters
 
 
 

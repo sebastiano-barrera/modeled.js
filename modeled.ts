@@ -1251,9 +1251,13 @@ export class VM {
 				throw {
 					label,
 					isBreakFor(labelCheck?: string) {
+						console.log(
+							`checking 'break ${label}' against label [${labelCheck}]`,
+						);
 						assert(labelCheck !== null, "!1");
-						return labelCheck === undefined || label === undefined ||
-							labelCheck == label;
+						const res = label === undefined || labelCheck == label;
+						console.log("->", res);
+						return res;
 					},
 				};
 			}
@@ -1264,9 +1268,13 @@ export class VM {
 				throw {
 					label,
 					isContinueFor(labelCheck?: string) {
+						console.log(
+							`checking 'continue ${label}' against label [${labelCheck}]`,
+						);
 						assert(labelCheck !== null, "!1");
-						return labelCheck === undefined || label === undefined ||
-							labelCheck == label;
+						const res = label === undefined || labelCheck == label;
+						console.log("->", res);
+						return res;
 					},
 				};
 			}
@@ -1392,7 +1400,16 @@ export class VM {
 				try {
 					while (this.coerceToBoolean(this.evalExpr(stmt.test))) {
 						try {
-							completion = this.runStmt(stmt.body) ?? completion;
+							assert(
+								stmt.body.type === "BlockStatement",
+								"for(x in y) body: body must be block statement",
+							);
+							// don't use runBlock: we want each intermediate completion
+							// value to be visible in `completion`, so as to be able to
+							// return it on break
+							for (const substmt of stmt.body.body) {
+								completion = this.runStmt(substmt) ?? completion;
+							}
 						} catch (e) {
 							if (!e.isContinueFor?.(details?.label)) throw e;
 						}
@@ -1410,7 +1427,17 @@ export class VM {
 				try {
 					do {
 						try {
-							completion = this.runStmt(stmt.body) ?? completion;
+							assert(
+								stmt.body.type === "BlockStatement",
+								"for(x in y) body: body must be block statement",
+							);
+							// don't use runBlock: we want each intermediate completion
+							// value to be visible in `completion`, so as to be able to
+							// return it on break
+							for (const substmt of stmt.body.body) {
+								completion = this.runStmt(substmt) ?? completion;
+								console.log('do while, completed stmt:', completion)
+							}
 						} catch (e) {
 							if (e.isContinueFor?.(details?.label)) {
 								// do nothing, just proceed to next statement

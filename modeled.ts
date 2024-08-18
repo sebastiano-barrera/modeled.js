@@ -802,8 +802,9 @@ class EnvVarScope extends Scope {
 	override deleteVar(name: string): boolean {
 		// this is probably buggy -- good enough for now until we change system
 		const inVar = this.var.deleteVar(name);
-		if (!inVar)
+		if (!inVar) {
 			return this.env.deleteVar(name);
+		}
 		return true;
 	}
 	override setDoNotDelete(name: string) {
@@ -959,10 +960,20 @@ export class VM {
 			this.runStmt(node);
 			return { outcome: "success" };
 		} catch (error) {
-			assert(
-				error.continue === undefined && error.break === undefined,
-				"vm bug: control-flow utility exception leaked!",
-			);
+			if (error.isContinueFor !== undefined) {
+				throw new AssertionError(
+					"vm bug: control-flow (continue) utility exception leaked!",
+				);
+			}
+			if (error.isBreakFor !== undefined) {
+				throw new AssertionError(
+					"vm bug: control-flow (break) utility exception leaked!",
+				);
+			}
+			// assert(
+			// 	error.continue === undefined && error.break === undefined,
+			// 	"vm bug: control-flow utility exception leaked!",
+			// );
 			if (error instanceof ProgramException) {
 				const excval = error.exceptionValue;
 				const message = excval.type === "object"
@@ -1024,18 +1035,33 @@ export class VM {
 		}
 	}
 
-	runBlock(block: {
-		bindings?: Map<string, DefineOptions>;
-		functionDecls?: Iterable<acorn.FunctionDeclaration>;
-		body: acorn.Program["body"];
-	}): JSValue {
+	runBlock(
+		block: {
+			bindings?: Map<string, DefineOptions>;
+			functionDecls?: Iterable<acorn.FunctionDeclaration>;
+			body: acorn.Program["body"];
+		},
+		label?: string,
+	): JSValue {
 		// important: the bindings must be done within the scope we just created!
 		this.doHoistedDeclarations(block);
 
 		let completion: JSValue = { type: "undefined" };
-		for (const stmt of block.body) {
-			// last iteration's CV becomes block's CV
-			completion = this.runStmt(stmt) ?? completion;
+		try {
+			for (const stmt of block.body) {
+				// last iteration's CV becomes block's CV
+				try {
+					completion = this.runStmt(stmt) ?? completion;
+				} catch (e) {
+					if (label === undefined || !e.isContinueFor?.(label)) {
+						throw e;
+					}
+				}
+			}
+		} catch (e) {
+			if (label === undefined || !e.isBreakFor?.(label)) {
+				throw e;
+			}
 		}
 		return completion;
 	}
@@ -1099,7 +1125,7 @@ export class VM {
 				scope.parent = this.currentScope;
 
 				return this.switchScope(scope, () => {
-					return this.runBlock(stmt);
+					return this.runBlock(stmt, details?.label);
 				});
 			}
 
@@ -1217,12 +1243,26 @@ export class VM {
 
 			case "BreakStatement": {
 				const label = stmt.label?.name;
-				throw { break: true, label };
+				assert(label !== null, "!2");
+				throw {
+					label,
+					isBreakFor(labelCheck?: string) {
+						assert(labelCheck !== null, "!1");
+						return labelCheck === undefined || label === undefined || labelCheck == label;
+					},
+				};
 			}
 
 			case "ContinueStatement": {
 				const label = stmt.label?.name;
-				throw { continue: true, label };
+				assert(label !== null, "!2");
+				throw {
+					label,
+					isContinueFor(labelCheck?: string) {
+						assert(labelCheck !== null, "!1");
+						return labelCheck === undefined || label === undefined || labelCheck == label;
+					},
+				};
 			}
 
 			case "ReturnStatement": {
@@ -1243,24 +1283,29 @@ export class VM {
 						} else this.evalExpr(stmt.init);
 					}
 
-					while (
-						stmt.test === null || stmt.test === undefined ||
-						this.isTruthy(this.evalExpr(stmt.test))
-					) {
-						// keep overwriting, return the last iteration's completion value
-						try {
-							completion = this.runStmt(stmt.body) ?? completion;
-						} catch (e) {
-							if (e.continue && e.label === details?.label) {
-								// do nothing, proceed with update
-							} else throw e;
-						}
+					try {
+						while (
+							stmt.test === null || stmt.test === undefined ||
+							this.isTruthy(this.evalExpr(stmt.test))
+						) {
+							// keep overwriting, return the last iteration's completion value
+							try {
+								completion = this.runStmt(stmt.body) ?? completion;
+							} catch (e) {
+								if (e.isContinueFor?.(details?.label)) {
+									// do nothing, proceed with update
+								} else throw e;
+							}
 
-						if (stmt.update !== null && stmt.update !== undefined) {
-							this.evalExpr(stmt.update);
+							if (stmt.update !== null && stmt.update !== undefined) {
+								this.evalExpr(stmt.update);
+							}
+						}
+					} catch (e) {
+						if (!e.isBreakFor?.(details?.label)) {
+							throw e;
 						}
 					}
-
 					return completion;
 				});
 
@@ -1269,45 +1314,57 @@ export class VM {
 
 				assert(iteree instanceof VMObject, "only supported: object iteree");
 				const properties = iteree.getOwnEnumerablePropertyNames();
-				for (const name of properties) {
-					// a new scope is created at each iteration, so that the iteration variable is
-					// distinct (different identity) at each cycle.
-					this.nestScope(() => {
-						this.doHoistedDeclarations(stmt);
-						let asmtTarget: acorn.Pattern;
+				try {
+					for (const name of properties) {
+						// a new scope is created at each iteration, so that the iteration variable is
+						// distinct (different identity) at each cycle.
+						this.nestScope(() => {
+							this.doHoistedDeclarations(stmt);
+							let asmtTarget: acorn.Pattern;
 
-						if (stmt.left.type === "VariableDeclaration") {
-							assert(
-								stmt.left.declarations.length === 1 &&
-									stmt.left.declarations[0].type === "VariableDeclarator" &&
-									stmt.left.declarations[0].init === null &&
-									stmt.left.declarations[0].id.type === "Identifier",
-								"only supported: single declaration with no init and a simple identifier as the pattern",
-							);
-							this.runStmt(stmt.left);
-							asmtTarget = stmt.left.declarations[0].id;
-						} else if (stmt.left.type === "Identifier") {
-							asmtTarget = stmt.left;
-						} else {
-							throw new AssertionError(
-								`in for(...in...) statement: left-hand side syntax not supported: ${stmt.left.type}`,
-							);
-						}
+							if (stmt.left.type === "VariableDeclaration") {
+								assert(
+									stmt.left.declarations.length === 1 &&
+										stmt.left.declarations[0].type === "VariableDeclarator" &&
+										stmt.left.declarations[0].init === null &&
+										stmt.left.declarations[0].id.type === "Identifier",
+									"only supported: single declaration with no init and a simple identifier as the pattern",
+								);
+								this.runStmt(stmt.left);
+								asmtTarget = stmt.left.declarations[0].id;
+							} else if (stmt.left.type === "Identifier") {
+								asmtTarget = stmt.left;
+							} else {
+								throw new AssertionError(
+									`in for(...in...) statement: left-hand side syntax not supported: ${stmt.left.type}`,
+								);
+							}
 
-						let nameJSV: JSValue;
-						if (typeof name === "string") {
-							nameJSV = { type: "string", value: name };
-						} else if (typeof name === "symbol") {
-							nameJSV = { type: "symbol", value: name };
-						} else {
-							throw new AssertionError(
-								`getOwnPropertyNames must return string or symbol, not ${typeof name}`,
-							);
-						}
+							let nameJSV: JSValue;
+							if (typeof name === "string") {
+								nameJSV = { type: "string", value: name };
+							} else if (typeof name === "symbol") {
+								nameJSV = { type: "symbol", value: name };
+							} else {
+								throw new AssertionError(
+									`getOwnPropertyNames must return string or symbol, not ${typeof name}`,
+								);
+							}
 
-						this.doAssignment(asmtTarget, nameJSV);
-						this.runStmt(stmt.body);
-					});
+							this.doAssignment(asmtTarget, nameJSV);
+							try {
+								this.runStmt(stmt.body);
+							} catch (e) {
+								if (!e.isContinueFor?.(details?.label)) {
+									throw e;
+								}
+							}
+						});
+					}
+				} catch (e) {
+					if (!e.isBreakFor?.(details?.label)) {
+						throw e;
+					}
 				}
 
 				return { type: "undefined" };
@@ -1315,11 +1372,17 @@ export class VM {
 
 			case "WhileStatement": {
 				let completion: JSValue = { type: "undefined" };
-				while (this.coerceToBoolean(this.evalExpr(stmt.test))) {
-					try {
-						completion = this.runStmt(stmt.body) ?? completion;
-					} catch (e) {
-						if (!e.continue) throw e;
+				try {
+					while (this.coerceToBoolean(this.evalExpr(stmt.test))) {
+						try {
+							completion = this.runStmt(stmt.body) ?? completion;
+						} catch (e) {
+							if (!e.isContinueFor?.(details?.label)) throw e;
+						}
+					}
+				} catch (e) {
+					if (!e.isBreakFor?.(details?.label)) {
+						throw e;
 					}
 				}
 				return completion;
@@ -1332,13 +1395,13 @@ export class VM {
 						try {
 							completion = this.runStmt(stmt.body) ?? completion;
 						} catch (e) {
-							if (e.continue && e.label === details?.label) {
+							if (e.isContinueFor?.(details?.label)) {
 								// do nothing, just proceed to next statement
 							} else throw e;
 						}
 					} while (this.coerceToBoolean(this.evalExpr(stmt.test)));
 				} catch (e) {
-					if (e.break && e.label === details?.label) {
+					if (e.isBreakFor?.(details?.label)) {
 						// do nothing; we've already unwound the stack, just proceed with the next
 						// statement (or whatever)
 					} else throw e;
@@ -1371,19 +1434,25 @@ export class VM {
 
 				// ... then start executing case branches one by one, starting from the jump target
 				let completion: JSValue = { type: "undefined" };
-				if (caseIndex !== null) {
-					this.nestScope(() => {
-						// as a special case, a SwitchStatement can have bindings/functionDefs, BUT
-						// those are meant to be executed specifically within its {block}.
-						// they all run, regardless of the taken case branch
-						this.doHoistedDeclarations(stmt);
+				try {
+					if (caseIndex !== null) {
+						this.nestScope(() => {
+							// as a special case, a SwitchStatement can have bindings/functionDefs, BUT
+							// those are meant to be executed specifically within its {block}.
+							// they all run, regardless of the taken case branch
+							this.doHoistedDeclarations(stmt);
 
-						for (let i = caseIndex; i < caseCount; i++) {
-							for (const substmt of stmt.cases[i].consequent) {
-								completion = this.runStmt(substmt) ?? completion;
+							for (let i = caseIndex; i < caseCount; i++) {
+								for (const substmt of stmt.cases[i].consequent) {
+									completion = this.runStmt(substmt) ?? completion;
+								}
 							}
-						}
-					});
+						});
+					}
+				} catch (e) {
+					if (!e.isBreakFor?.(details?.label)) {
+						throw e;
+					}
 				}
 				return completion;
 			}

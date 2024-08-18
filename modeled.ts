@@ -405,7 +405,11 @@ abstract class VMInvokable extends VMObject {
 
 	canConstruct: boolean = false;
 
-	constructor(public params: string[], public readonly declScope: Scope, consPrototype?: VMObject) {
+	constructor(
+		public params: string[],
+		public readonly declScope: Scope,
+		consPrototype?: VMObject,
+	) {
 		super(R().PROTO_FUNCTION);
 		if (consPrototype === undefined) {
 			consPrototype = new VMObject();
@@ -665,7 +669,7 @@ class VarScope extends Scope {
 	override setVar(
 		name: string,
 		valueOrThunk: JSValue | (() => JSValue),
-		vm: VM,
+		vm?: VM,
 	) {
 		assert(
 			vm instanceof VM,
@@ -768,6 +772,44 @@ class EnvScope extends Scope {
 
 	setDoNotDelete(name: string) {
 		this.dontDelete.add(name);
+	}
+}
+
+// damn it, OOP
+// TODO replace with a completely different system (as static as possible)
+class EnvVarScope extends Scope {
+	private env: EnvScope;
+	private var = new VarScope();
+
+	constructor(public envObject: VMObject) {
+		super();
+		this.env = new EnvScope(envObject);
+		this.var.parent = this.env;
+	}
+
+	override defineVar(name: string, options: DefineOptions): void {
+		if (options.allowAsGlobalObjectProperty) {
+			return this.env.defineVar(name, options);
+		}
+		return this.var.defineVar(name, options);
+	}
+	override setVar(name: string, valueOrThunk: JSValue | (() => JSValue), vm?: VM): void {
+		return this.var.setVar(name, valueOrThunk, vm);
+	}
+	override lookupVar(name: string): JSValue | "TDZ" | undefined {
+		return this.var.lookupVar(name);
+	}
+	override deleteVar(name: string): boolean {
+		// this is probably buggy -- good enough for now until we change system
+		const inVar = this.var.deleteVar(name);
+		if (!inVar)
+			return this.env.deleteVar(name);
+		return true;
+	}
+	override setDoNotDelete(name: string) {
+		// this is probably buggy -- good enough for now until we change system
+		this.env.setDoNotDelete(name);
+		this.var.setDoNotDelete(name);
 	}
 }
 
@@ -1031,327 +1073,329 @@ export class VM {
 		}
 
 		const stmt = <Node & (acorn.Statement | acorn.Program)> node;
-		try {
-			switch (stmt.type) {
-				// each of these handlers returns the *completion value* of the statement (if any)
+		switch (stmt.type) {
+			// each of these handlers returns the *completion value* of the statement (if any)
 
-				case "EmptyStatement":
-					return { type: "undefined" };
+			case "EmptyStatement":
+				return { type: "undefined" };
 
-				case "Program":
-				case "BlockStatement": {
-					let scope;
-					if (stmt.type === "Program") {
-						scope = new EnvScope(this.globalObj);
-						scope.this = this.globalObj;
-						if (
-							stmt.body.length > 0 &&
-							stmt.body[0].type === "ExpressionStatement" &&
-							stmt.body[0].directive === "use strict"
-						) {
-							scope.isSetStrict = true;
-						}
-					} else if (stmt.type === "BlockStatement") {
-						scope = new VarScope();
-					} else throw new AssertionError();
-
-					scope.parent = this.currentScope;
-
-					return this.switchScope(scope, () => {
-						return this.runBlock(stmt);
-					});
-				}
-
-				case "TryStatement":
-					try {
-						return this.nestScope(() => this.runStmt(stmt.block));
-					} catch (err) {
-						if (err instanceof ProgramException && stmt.handler) {
-							assert(
-								stmt.handler.type === "CatchClause",
-								"parser bug: try statement's handler must be CatchClause",
-							);
-							assert(
-								stmt.handler.param !== null && stmt.handler.param !== undefined,
-								"unsuppored: handler without param",
-							);
-							assert(
-								stmt.handler.param.type === "Identifier",
-								"only supported: catch clause param Identifier",
-							);
-
-							const paramName = stmt.handler.param.name;
-							const body = stmt.handler.body;
-							return this.nestScope(() => {
-								this.defineVar(paramName, {
-									allowRedecl: false,
-									defaultValue: err.exceptionValue,
-								});
-								this.setDoNotDelete(paramName);
-								return this.runStmt(body);
-							});
-						} else {
-							// either pass the ProgramException to another of the program's try blocks
-							// or pass the AssertionError to the VM caller
-							throw err;
-						}
-					} finally {
-						this.nestScope(() => {
-							if (stmt.finalizer !== null && stmt.finalizer !== undefined) {
-								return this.runStmt(stmt.finalizer);
-							}
-						});
-					}
-
-				case "ThrowStatement": {
-					const exceptionValue = this.evalExpr(stmt.argument);
-					throw new ProgramException(exceptionValue, this.synCtx);
-				}
-
-				case "FunctionDeclaration": {
-					// #run-FunctionDeclaration
-					// do nothing!
-					//   - hoistDeclarations must already have created the appopriate items on a
-					//     Node's `bindings` and `functionDefs` nodes.
-					//
-					//   - runStmt must already have created and assigned the function to its name
-					//     (if any; see #run-functionDefs).
-					//
-					//   - doesn't even count for a completion value
-					return undefined;
-				}
-
-				case "ExpressionStatement":
-					// expression value becomes completion value
-					return this.evalExpr(stmt.expression);
-
-				case "IfStatement": {
-					const test = this.evalExpr(stmt.test);
-
-					if (this.isTruthy(test)) {
-						return this.runStmt(stmt.consequent);
-					} else if (stmt.alternate) {
-						return this.runStmt(stmt.alternate);
-					}
-					return { type: "undefined" };
-				}
-
-				case "VariableDeclaration": {
+			case "Program":
+			case "BlockStatement": {
+				let scope;
+				if (stmt.type === "Program") {
+					scope = new EnvVarScope(this.globalObj);
+					scope.this = this.globalObj;
 					if (
-						stmt.kind !== "var" && stmt.kind !== "let" && stmt.kind !== "const"
+						stmt.body.length > 0 &&
+						stmt.body[0].type === "ExpressionStatement" &&
+						stmt.body[0].directive === "use strict"
 					) {
-						throw new AssertionError("unsupported var decl type: " + stmt.kind);
+						scope.isSetStrict = true;
 					}
+				} else if (stmt.type === "BlockStatement") {
+					scope = new VarScope();
+				} else throw new AssertionError();
 
-					let completion: JSValue = { type: "undefined" };
+				scope.parent = this.currentScope;
 
-					for (const decl of stmt.declarations) {
+				return this.switchScope(scope, () => {
+					return this.runBlock(stmt);
+				});
+			}
+
+			case "TryStatement":
+				try {
+					return this.nestScope(() => this.runStmt(stmt.block));
+				} catch (err) {
+					if (err instanceof ProgramException && stmt.handler) {
 						assert(
-							decl.type === "VariableDeclarator",
-							"decl type must be VariableDeclarator",
+							stmt.handler.type === "CatchClause",
+							"parser bug: try statement's handler must be CatchClause",
 						);
-						if (decl.id.type === "Identifier") {
-							if (decl.init === undefined || decl.init === null) {
-								continue;
-							}
-							const name = decl.id.name;
-							const value: JSValue = this.evalExpr(decl.init);
+						assert(
+							stmt.handler.param !== null && stmt.handler.param !== undefined,
+							"unsuppored: handler without param",
+						);
+						assert(
+							stmt.handler.param.type === "Identifier",
+							"only supported: catch clause param Identifier",
+						);
 
-							// `defineVar` for this name must have already been done by hoistDeclarations
-							// and #run-functionDefs
-							this.setVar(name, value);
-
-							if (stmt.declarations.length === 1) {
-								completion = value;
-							}
-						} else {
-							throw new AssertionError(
-								"unsupported declarator id type: " + decl.id.type,
-							);
-						}
-					}
-
-					return completion;
-				}
-
-				case "BreakStatement": {
-					const label = stmt.label?.name;
-					throw { break: true, label };
-				}
-
-				case "ContinueStatement": {
-					const label = stmt.label?.name;
-					throw { continue: true, label };
-				}
-
-				case "ReturnStatement": {
-					if (stmt.argument === undefined || stmt.argument === null) {
-						throw { returnValue: { type: "undefined" } };
-					}
-					const returnValue = this.evalExpr(stmt.argument);
-					throw { returnValue };
-				}
-
-				case "ForStatement":
-					return this.nestScope(() => {
-						let completion: JSValue = { type: "undefined" };
-
-						if (stmt.init !== null && stmt.init !== undefined) {
-							if (stmt.init.type === "VariableDeclaration") {
-								this.runStmt(stmt.init);
-							} else this.evalExpr(stmt.init);
-						}
-
-						while (
-							stmt.test === null || stmt.test === undefined ||
-							this.isTruthy(this.evalExpr(stmt.test))
-						) {
-							// keep overwriting, return the last iteration's completion value
-							try {
-								completion = this.runStmt(stmt.body) ?? completion;
-							} catch (e) {
-								if (e.continue && e.label === details?.label) {
-									// do nothing, proceed with update
-								} else throw e;
-							}
-
-							if (stmt.update !== null && stmt.update !== undefined) {
-								this.evalExpr(stmt.update);
-							}
-						}
-
-						return completion;
-					});
-
-				case "ForInStatement": {
-					const iteree = this.evalExpr(stmt.right);
-
-					assert(iteree instanceof VMObject, "only supported: object iteree");
-					const properties = iteree.getOwnEnumerablePropertyNames();
-					for (const name of properties) {
-						// a new scope is created at each iteration, so that the iteration variable is
-						// distinct (different identity) at each cycle.
-						this.nestScope(() => {
-							this.doHoistedDeclarations(stmt);
-							let asmtTarget: acorn.Pattern;
-
-							if (stmt.left.type === "VariableDeclaration") {
-								assert(
-									stmt.left.declarations.length === 1 &&
-										stmt.left.declarations[0].type === "VariableDeclarator" &&
-										stmt.left.declarations[0].init === null &&
-										stmt.left.declarations[0].id.type === "Identifier",
-									"only supported: single declaration with no init and a simple identifier as the pattern",
-								);
-								this.runStmt(stmt.left);
-								asmtTarget = stmt.left.declarations[0].id;
-							} else if (stmt.left.type === "Identifier") {
-								asmtTarget = stmt.left;
-							} else {
-								throw new AssertionError(
-									`in for(...in...) statement: left-hand side syntax not supported: ${stmt.left.type}`,
-								);
-							}
-
-							let nameJSV: JSValue;
-							if (typeof name === "string") {
-								nameJSV = { type: "string", value: name };
-							} else if (typeof name === "symbol") {
-								nameJSV = { type: "symbol", value: name };
-							} else {
-								throw new AssertionError(
-									`getOwnPropertyNames must return string or symbol, not ${typeof name}`,
-								);
-							}
-
-							this.doAssignment(asmtTarget, nameJSV);
-							this.runStmt(stmt.body);
+						const paramName = stmt.handler.param.name;
+						const body = stmt.handler.body;
+						return this.nestScope(() => {
+							this.defineVar(paramName, {
+								allowRedecl: false,
+								defaultValue: err.exceptionValue,
+							});
+							this.setDoNotDelete(paramName);
+							return this.runStmt(body);
 						});
+					} else {
+						// either pass the ProgramException to another of the program's try blocks
+						// or pass the AssertionError to the VM caller
+						throw err;
 					}
-
-					return { type: "undefined" };
+				} finally {
+					this.nestScope(() => {
+						if (stmt.finalizer !== null && stmt.finalizer !== undefined) {
+							return this.runStmt(stmt.finalizer);
+						}
+					});
 				}
 
-				case "WhileStatement": {
+			case "ThrowStatement": {
+				const exceptionValue = this.evalExpr(stmt.argument);
+				throw new ProgramException(exceptionValue, this.synCtx);
+			}
+
+			case "FunctionDeclaration": {
+				// #run-FunctionDeclaration
+				// do nothing!
+				//   - hoistDeclarations must already have created the appopriate items on a
+				//     Node's `bindings` and `functionDefs` nodes.
+				//
+				//   - runStmt must already have created and assigned the function to its name
+				//     (if any; see #run-functionDefs).
+				//
+				//   - doesn't even count for a completion value
+				return undefined;
+			}
+
+			case "ExpressionStatement":
+				// expression value becomes completion value
+				return this.evalExpr(stmt.expression);
+
+			case "IfStatement": {
+				const test = this.evalExpr(stmt.test);
+
+				if (this.isTruthy(test)) {
+					return this.runStmt(stmt.consequent);
+				} else if (stmt.alternate) {
+					return this.runStmt(stmt.alternate);
+				}
+				return { type: "undefined" };
+			}
+
+			case "VariableDeclaration": {
+				if (
+					stmt.kind !== "var" && stmt.kind !== "let" && stmt.kind !== "const"
+				) {
+					throw new AssertionError("unsupported var decl type: " + stmt.kind);
+				}
+
+				let completion: JSValue = { type: "undefined" };
+
+				for (const decl of stmt.declarations) {
+					assert(
+						decl.type === "VariableDeclarator",
+						"decl type must be VariableDeclarator",
+					);
+					if (decl.id.type === "Identifier") {
+						if (decl.init === undefined || decl.init === null) {
+							continue;
+						}
+						const name = decl.id.name;
+						const value: JSValue = this.evalExpr(decl.init);
+
+						// `defineVar` for this name must have already been done by hoistDeclarations
+						// and #run-functionDefs
+						this.setVar(name, value);
+
+						if (stmt.declarations.length === 1) {
+							completion = value;
+						}
+					} else {
+						throw new AssertionError(
+							"unsupported declarator id type: " + decl.id.type,
+						);
+					}
+				}
+
+				return completion;
+			}
+
+			case "BreakStatement": {
+				const label = stmt.label?.name;
+				throw { break: true, label };
+			}
+
+			case "ContinueStatement": {
+				const label = stmt.label?.name;
+				throw { continue: true, label };
+			}
+
+			case "ReturnStatement": {
+				if (stmt.argument === undefined || stmt.argument === null) {
+					throw { returnValue: { type: "undefined" } };
+				}
+				const returnValue = this.evalExpr(stmt.argument);
+				throw { returnValue };
+			}
+
+			case "ForStatement":
+				return this.nestScope(() => {
 					let completion: JSValue = { type: "undefined" };
-					while (this.coerceToBoolean(this.evalExpr(stmt.test))) {
+
+					if (stmt.init !== null && stmt.init !== undefined) {
+						if (stmt.init.type === "VariableDeclaration") {
+							this.runStmt(stmt.init);
+						} else this.evalExpr(stmt.init);
+					}
+
+					while (
+						stmt.test === null || stmt.test === undefined ||
+						this.isTruthy(this.evalExpr(stmt.test))
+					) {
+						// keep overwriting, return the last iteration's completion value
 						try {
 							completion = this.runStmt(stmt.body) ?? completion;
 						} catch (e) {
-							if (!e.continue) throw e;
+							if (e.continue && e.label === details?.label) {
+								// do nothing, proceed with update
+							} else throw e;
+						}
+
+						if (stmt.update !== null && stmt.update !== undefined) {
+							this.evalExpr(stmt.update);
 						}
 					}
+
 					return completion;
+				});
+
+			case "ForInStatement": {
+				const iteree = this.evalExpr(stmt.right);
+
+				assert(iteree instanceof VMObject, "only supported: object iteree");
+				const properties = iteree.getOwnEnumerablePropertyNames();
+				for (const name of properties) {
+					// a new scope is created at each iteration, so that the iteration variable is
+					// distinct (different identity) at each cycle.
+					this.nestScope(() => {
+						this.doHoistedDeclarations(stmt);
+						let asmtTarget: acorn.Pattern;
+
+						if (stmt.left.type === "VariableDeclaration") {
+							assert(
+								stmt.left.declarations.length === 1 &&
+									stmt.left.declarations[0].type === "VariableDeclarator" &&
+									stmt.left.declarations[0].init === null &&
+									stmt.left.declarations[0].id.type === "Identifier",
+								"only supported: single declaration with no init and a simple identifier as the pattern",
+							);
+							this.runStmt(stmt.left);
+							asmtTarget = stmt.left.declarations[0].id;
+						} else if (stmt.left.type === "Identifier") {
+							asmtTarget = stmt.left;
+						} else {
+							throw new AssertionError(
+								`in for(...in...) statement: left-hand side syntax not supported: ${stmt.left.type}`,
+							);
+						}
+
+						let nameJSV: JSValue;
+						if (typeof name === "string") {
+							nameJSV = { type: "string", value: name };
+						} else if (typeof name === "symbol") {
+							nameJSV = { type: "symbol", value: name };
+						} else {
+							throw new AssertionError(
+								`getOwnPropertyNames must return string or symbol, not ${typeof name}`,
+							);
+						}
+
+						this.doAssignment(asmtTarget, nameJSV);
+						this.runStmt(stmt.body);
+					});
 				}
 
-				case "DoWhileStatement": {
-					let completion: JSValue = { type: "undefined" };
+				return { type: "undefined" };
+			}
+
+			case "WhileStatement": {
+				let completion: JSValue = { type: "undefined" };
+				while (this.coerceToBoolean(this.evalExpr(stmt.test))) {
+					try {
+						completion = this.runStmt(stmt.body) ?? completion;
+					} catch (e) {
+						if (!e.continue) throw e;
+					}
+				}
+				return completion;
+			}
+
+			case "DoWhileStatement": {
+				let completion: JSValue = { type: "undefined" };
+				try {
 					do {
 						try {
 							completion = this.runStmt(stmt.body) ?? completion;
 						} catch (e) {
-							if (!e.continue) throw e;
+							if (e.continue && e.label === details?.label) {
+								// do nothing, just proceed to next statement
+							} else throw e;
 						}
 					} while (this.coerceToBoolean(this.evalExpr(stmt.test)));
-					return completion;
+				} catch (e) {
+					if (e.break && e.label === details?.label) {
+						// do nothing; we've already unwound the stack, just proceed with the next
+						// statement (or whatever)
+					} else throw e;
 				}
-
-				case "SwitchStatement": {
-					const discriminant = this.evalExpr(stmt.discriminant);
-
-					// figure out which case label we're jumping to...
-					const caseCount = stmt.cases.length;
-					let caseIndex = null;
-					let defaultIndex = null;
-					for (let i = 0; i < caseCount; i++) {
-						const branch = stmt.cases[i];
-						if (
-							typeof branch.test === "object" && branch.test !== null
-						) {
-							const testValue = this.evalExpr(branch.test);
-							if (this.tripleEqualValues(discriminant, testValue)) {
-								caseIndex = i;
-								break;
-							}
-						} else {
-							defaultIndex = i;
-						}
-					}
-					if (caseIndex === null) caseIndex = defaultIndex;
-
-					// ... then start executing case branches one by one, starting from the jump target
-					let completion: JSValue = { type: "undefined" };
-					if (caseIndex !== null) {
-						this.nestScope(() => {
-							// as a special case, a SwitchStatement can have bindings/functionDefs, BUT
-							// those are meant to be executed specifically within its {block}.
-							// they all run, regardless of the taken case branch
-							this.doHoistedDeclarations(stmt);
-
-							for (let i = caseIndex; i < caseCount; i++) {
-								for (const substmt of stmt.cases[i].consequent) {
-									completion = this.runStmt(substmt) ?? completion;
-								}
-							}
-						});
-					}
-					return completion;
-				}
-
-				case "LabeledStatement":
-					return this._runStmt(
-						stmt.body,
-						{ label: stmt.label.name },
-					);
-
-				default:
-					throw new AssertionError("not a (supported) statement: " + stmt.type);
+				return completion;
 			}
-		} catch (e) {
-			if (e.break && e.label === details?.label) {
-				// do nothing; we've already unwound the stack, just proceed with the next
-				// statement (or whatever)
-			} else throw e;
+
+			case "SwitchStatement": {
+				const discriminant = this.evalExpr(stmt.discriminant);
+
+				// figure out which case label we're jumping to...
+				const caseCount = stmt.cases.length;
+				let caseIndex = null;
+				let defaultIndex = null;
+				for (let i = 0; i < caseCount; i++) {
+					const branch = stmt.cases[i];
+					if (
+						typeof branch.test === "object" && branch.test !== null
+					) {
+						const testValue = this.evalExpr(branch.test);
+						if (this.tripleEqualValues(discriminant, testValue)) {
+							caseIndex = i;
+							break;
+						}
+					} else {
+						defaultIndex = i;
+					}
+				}
+				if (caseIndex === null) caseIndex = defaultIndex;
+
+				// ... then start executing case branches one by one, starting from the jump target
+				let completion: JSValue = { type: "undefined" };
+				if (caseIndex !== null) {
+					this.nestScope(() => {
+						// as a special case, a SwitchStatement can have bindings/functionDefs, BUT
+						// those are meant to be executed specifically within its {block}.
+						// they all run, regardless of the taken case branch
+						this.doHoistedDeclarations(stmt);
+
+						for (let i = caseIndex; i < caseCount; i++) {
+							for (const substmt of stmt.cases[i].consequent) {
+								completion = this.runStmt(substmt) ?? completion;
+							}
+						}
+					});
+				}
+				return completion;
+			}
+
+			case "LabeledStatement":
+				return this._runStmt(
+					stmt.body,
+					{ label: stmt.label.name },
+				);
+
+			default:
+				throw new AssertionError("not a (supported) statement: " + stmt.type);
 		}
 	}
 

@@ -793,7 +793,11 @@ class EnvVarScope extends Scope {
 		}
 		return this.var.defineVar(name, options);
 	}
-	override setVar(name: string, valueOrThunk: JSValue | (() => JSValue), vm?: VM): void {
+	override setVar(
+		name: string,
+		valueOrThunk: JSValue | (() => JSValue),
+		vm?: VM,
+	): void {
 		return this.var.setVar(name, valueOrThunk, vm);
 	}
 	override lookupVar(name: string): JSValue | "TDZ" | undefined {
@@ -1248,7 +1252,8 @@ export class VM {
 					label,
 					isBreakFor(labelCheck?: string) {
 						assert(labelCheck !== null, "!1");
-						return labelCheck === undefined || label === undefined || labelCheck == label;
+						return labelCheck === undefined || label === undefined ||
+							labelCheck == label;
 					},
 				};
 			}
@@ -1260,7 +1265,8 @@ export class VM {
 					label,
 					isContinueFor(labelCheck?: string) {
 						assert(labelCheck !== null, "!1");
-						return labelCheck === undefined || label === undefined || labelCheck == label;
+						return labelCheck === undefined || label === undefined ||
+							labelCheck == label;
 					},
 				};
 			}
@@ -1312,6 +1318,8 @@ export class VM {
 			case "ForInStatement": {
 				const iteree = this.evalExpr(stmt.right);
 
+				let completion: JSValue = { type: "undefined" };
+
 				assert(iteree instanceof VMObject, "only supported: object iteree");
 				const properties = iteree.getOwnEnumerablePropertyNames();
 				try {
@@ -1353,7 +1361,16 @@ export class VM {
 
 							this.doAssignment(asmtTarget, nameJSV);
 							try {
-								this.runStmt(stmt.body);
+								assert(
+									stmt.body.type === "BlockStatement",
+									"for(x in y) body: body must be block statement",
+								);
+								// don't use runBlock: we want each intermediate completion
+								// value to be visible in `completion`, so as to be able to
+								// return it on break
+								for (const substmt of stmt.body.body) {
+									completion = this.runStmt(substmt) ?? completion;
+								}
 							} catch (e) {
 								if (!e.isContinueFor?.(details?.label)) {
 									throw e;
@@ -1367,7 +1384,7 @@ export class VM {
 					}
 				}
 
-				return { type: "undefined" };
+				return completion;
 			}
 
 			case "WhileStatement": {

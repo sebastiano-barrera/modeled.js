@@ -1206,9 +1206,9 @@ export class VM {
 					const test = this.evalExpr(stmt.test);
 
 					if (this.isTruthy(test)) {
-						return this.runStmt(stmt.consequent);
+						return this.runStmt(stmt.consequent, { noBreak: true });
 					} else if (stmt.alternate) {
-						return this.runStmt(stmt.alternate);
+						return this.runStmt(stmt.alternate, { noBreak: true });
 					}
 					return;
 				}
@@ -1293,6 +1293,7 @@ export class VM {
 								stmt.test === null || stmt.test === undefined ||
 								this.isTruthy(this.evalExpr(stmt.test))
 							) {
+								this.completionValue = { type: "undefined" };
 								this.catchContinue(
 									details?.label,
 									() => this.runStmt(stmt.body, { noBreak: true }),
@@ -1313,6 +1314,8 @@ export class VM {
 					const properties = iteree.getOwnEnumerablePropertyNames();
 					this.catchBreak(details?.label, () => {
 						for (const name of properties) {
+							this.completionValue = { type: "undefined" };
+
 							// a new scope is created at each iteration, so that the iteration variable is
 							// distinct (different identity) at each cycle.
 							this.nestScope(() => {

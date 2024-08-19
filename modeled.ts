@@ -1139,7 +1139,9 @@ export class VM {
 
 				case "TryStatement":
 					try {
-						return this.nestScope(() => this.runStmt(stmt.block));
+						return this.nestScope(() =>
+							this.runStmt(stmt.block, { noBreak: true })
+						);
 					} catch (err) {
 						if (err instanceof ProgramException && stmt.handler) {
 							assert(
@@ -1163,7 +1165,7 @@ export class VM {
 									defaultValue: err.exceptionValue,
 								});
 								this.setDoNotDelete(paramName);
-								return this.runStmt(body);
+								return this.runStmt(body, { noBreak: true });
 							});
 						} else {
 							// either pass the ProgramException to another of the program's try blocks
@@ -1173,7 +1175,7 @@ export class VM {
 					} finally {
 						this.nestScope(() => {
 							if (stmt.finalizer !== null && stmt.finalizer !== undefined) {
-								return this.runStmt(stmt.finalizer);
+								return this.runStmt(stmt.finalizer, { noBreak: true });
 							}
 						});
 					}

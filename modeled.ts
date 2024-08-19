@@ -861,8 +861,6 @@ export class VM {
 	// VM state (variables, stack, heap, ...)
 	//
 
-	// TODO remove `kind` (already handled by hoisting)
-	// TODO remove value initializer (already handled by hoisting; instead, initialize as TDZ)
 	defineVar(
 		name: string,
 		options: DefineOptions,

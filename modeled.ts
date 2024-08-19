@@ -1122,6 +1122,11 @@ export class VM {
 			switch (stmt.type) {
 				// each of these handlers returns the *completion value* of the statement (if any)
 
+				case "WithStatement":
+					throw new ArbitrarilyLeftUnimplemented(
+						"with(...) { ... } is not supported in this JavaScript interpreter",
+					);
+
 				case "EmptyStatement":
 					return;
 

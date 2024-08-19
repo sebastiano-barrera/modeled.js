@@ -3047,6 +3047,23 @@ function initBuiltins(realm: Realm) {
 			return { type: "boolean", value: ret ?? false };
 		}),
 	);
+	realm.PROTO_OBJECT.setProperty(
+		"propertyIsEnumerable",
+		nativeVMFunc((vm, subject, args) => {
+			const obj = vm.coerceToObject(subject);
+			if (args[0] === undefined) {
+				return vm.throwError(
+					"TypeError",
+					"first argument must be property name",
+				);
+			}
+			const name = vm.coerceToString(args[0]);
+
+			const descriptor = obj.getOwnPropertyDescriptor(name);
+			const value = descriptor?.enumerable ?? false;
+			return { type: "boolean", value };
+		}),
+	);
 
 	realm.PROTO_ARRAY.setProperty(
 		"push",

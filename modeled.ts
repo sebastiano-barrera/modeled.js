@@ -22,6 +22,8 @@ function assert(
 	}
 }
 
+export class ArbitrarilyLeftUnimplemented extends AssertionError {}
+
 // deno-fmt-ignore
 // deno-lint-ignore no-explicit-any
 function assertIsValue(t: { type: string; value?: any }): asserts t is JSValue {
@@ -160,6 +162,13 @@ class VMObject {
 	// cases. See `resolveDescriptor`.
 	createdFromCoercion: boolean = false;
 
+	/** True iff this is an `arguments` array for a function call.
+	 *
+	 * This is used to reject any use of Object.defineProperty. I decided that
+	 * it's too convoluted and I don't want to implement it.
+	 */
+	isArgsArray: boolean = false;
+
 	constructor(private _proto: VMObject | null = R().PROTO_OBJECT) {}
 
 	resolveDescriptor(descriptor: Descriptor, vm?: VM) {
@@ -271,6 +280,12 @@ class VMObject {
 		}
 	}
 	defineProperty(name: PropName, descriptor: Descriptor) {
+		if (this.isArgsArray) {
+			throw new ArbitrarilyLeftUnimplemented(
+				"in this JS engine, you cannot use Object.defineProperty on the `arguments` object",
+			);
+		}
+
 		if (!this.extensionAllowed) {
 			throw new ExceptionRequest(
 				"TypeError",
@@ -476,6 +491,7 @@ abstract class VMInvokable extends VMObject {
 				vm.defineVar("arguments", { allowRedecl: true });
 				vm.setVar("arguments", () => {
 					const argumentsArray = new VMArray();
+					argumentsArray.isArgsArray = true;
 					argumentsArray.arrayElements.push(...args);
 					return argumentsArray;
 				});

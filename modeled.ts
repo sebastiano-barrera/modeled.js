@@ -1051,22 +1051,14 @@ export class VM {
 		this.doHoistedDeclarations(block);
 
 		let completion: JSValue = { type: "undefined" };
-		try {
+		this.catchBreak(label, () => {
 			for (const stmt of block.body) {
-				// last iteration's CV becomes block's CV
-				try {
+				this.catchContinue(label, () => {
+					// last iteration's CV becomes block's CV
 					completion = this.runStmt(stmt) ?? completion;
-				} catch (e) {
-					if (label === undefined || !e.isContinueFor?.(label)) {
-						throw e;
-					}
-				}
+				});
 			}
-		} catch (e) {
-			if (label === undefined || !e.isBreakFor?.(label)) {
-				throw e;
-			}
-		}
+		});
 		return completion;
 	}
 
@@ -1297,29 +1289,21 @@ export class VM {
 						} else this.evalExpr(stmt.init);
 					}
 
-					try {
+					this.catchBreak(details?.label, () => {
 						while (
 							stmt.test === null || stmt.test === undefined ||
 							this.isTruthy(this.evalExpr(stmt.test))
 						) {
-							// keep overwriting, return the last iteration's completion value
-							try {
+							this.catchContinue(details?.label, () => {
+								// keep overwriting, return the last iteration's completion value
 								completion = this.runStmt(stmt.body) ?? completion;
-							} catch (e) {
-								if (e.isContinueFor?.(details?.label)) {
-									// do nothing, proceed with update
-								} else throw e;
-							}
+							});
 
 							if (stmt.update !== null && stmt.update !== undefined) {
 								this.evalExpr(stmt.update);
 							}
 						}
-					} catch (e) {
-						if (!e.isBreakFor?.(details?.label)) {
-							throw e;
-						}
-					}
+					});
 					return completion;
 				});
 
@@ -1330,7 +1314,7 @@ export class VM {
 
 				assert(iteree instanceof VMObject, "only supported: object iteree");
 				const properties = iteree.getOwnEnumerablePropertyNames();
-				try {
+				this.catchBreak(details?.label, () => {
 					for (const name of properties) {
 						// a new scope is created at each iteration, so that the iteration variable is
 						// distinct (different identity) at each cycle.
@@ -1368,7 +1352,7 @@ export class VM {
 							}
 
 							this.doAssignment(asmtTarget, nameJSV);
-							try {
+							this.catchContinue(details?.label, () => {
 								assert(
 									stmt.body.type === "BlockStatement",
 									"for(x in y) body: body must be block statement",
@@ -1379,27 +1363,19 @@ export class VM {
 								for (const substmt of stmt.body.body) {
 									completion = this.runStmt(substmt) ?? completion;
 								}
-							} catch (e) {
-								if (!e.isContinueFor?.(details?.label)) {
-									throw e;
-								}
-							}
+							});
 						});
 					}
-				} catch (e) {
-					if (!e.isBreakFor?.(details?.label)) {
-						throw e;
-					}
-				}
+				});
 
 				return completion;
 			}
 
 			case "WhileStatement": {
 				let completion: JSValue = { type: "undefined" };
-				try {
+				this.catchBreak(details?.label, () => {
 					while (this.coerceToBoolean(this.evalExpr(stmt.test))) {
-						try {
+						this.catchContinue(details?.label, () => {
 							assert(
 								stmt.body.type === "BlockStatement",
 								"for(x in y) body: body must be block statement",
@@ -1410,23 +1386,18 @@ export class VM {
 							for (const substmt of stmt.body.body) {
 								completion = this.runStmt(substmt) ?? completion;
 							}
-						} catch (e) {
-							if (!e.isContinueFor?.(details?.label)) throw e;
-						}
+						});
 					}
-				} catch (e) {
-					if (!e.isBreakFor?.(details?.label)) {
-						throw e;
-					}
-				}
+				});
+
 				return completion;
 			}
 
 			case "DoWhileStatement": {
 				let completion: JSValue = { type: "undefined" };
-				try {
+				this.catchBreak(details?.label, () => {
 					do {
-						try {
+						this.catchContinue(details?.label, () => {
 							assert(
 								stmt.body.type === "BlockStatement",
 								"for(x in y) body: body must be block statement",
@@ -1436,20 +1407,11 @@ export class VM {
 							// return it on break
 							for (const substmt of stmt.body.body) {
 								completion = this.runStmt(substmt) ?? completion;
-								console.log('do while, completed stmt:', completion)
+								console.log("do while, completed stmt:", completion);
 							}
-						} catch (e) {
-							if (e.isContinueFor?.(details?.label)) {
-								// do nothing, just proceed to next statement
-							} else throw e;
-						}
+						});
 					} while (this.coerceToBoolean(this.evalExpr(stmt.test)));
-				} catch (e) {
-					if (e.isBreakFor?.(details?.label)) {
-						// do nothing; we've already unwound the stack, just proceed with the next
-						// statement (or whatever)
-					} else throw e;
-				}
+				});
 				return completion;
 			}
 
@@ -1478,8 +1440,8 @@ export class VM {
 
 				// ... then start executing case branches one by one, starting from the jump target
 				let completion: JSValue = { type: "undefined" };
-				try {
-					if (caseIndex !== null) {
+				if (caseIndex !== null) {
+					this.catchBreak(details?.label, () => {
 						this.nestScope(() => {
 							// as a special case, a SwitchStatement can have bindings/functionDefs, BUT
 							// those are meant to be executed specifically within its {block}.
@@ -1492,11 +1454,7 @@ export class VM {
 								}
 							}
 						});
-					}
-				} catch (e) {
-					if (!e.isBreakFor?.(details?.label)) {
-						throw e;
-					}
+					});
 				}
 				return completion;
 			}
@@ -1560,6 +1518,22 @@ export class VM {
 		}
 
 		return func;
+	}
+
+	catchBreak<T>(label: string | undefined, action: () => T): T | undefined {
+		try {
+			return action();
+		} catch (e) {
+			if (!e.isBreakFor?.(label)) throw e;
+		}
+	}
+
+	catchContinue<T>(label: string | undefined, action: () => T): T | undefined {
+		try {
+			return action();
+		} catch (e) {
+			if (!e.isContinueFor?.(label)) throw e;
+		}
 	}
 
 	//

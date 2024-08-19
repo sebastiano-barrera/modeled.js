@@ -420,6 +420,9 @@ abstract class VMInvokable extends VMObject {
 
 	canConstruct: boolean = false;
 
+	// default initializers. eval'ed at call time
+	paramInitializers: (acorn.Expression | null)[] = [];
+
 	constructor(
 		public params: string[],
 		public readonly declScope: Scope,
@@ -469,10 +472,6 @@ abstract class VMInvokable extends VMObject {
 
 				// not all subclasses have named params
 				if (this.params !== undefined) {
-					while (args.length < this.params.length) {
-						args.push({ type: "undefined" });
-					}
-
 					// #func-param-define
 					const definedParams = new Set<string>();
 					for (const name of this.params) {
@@ -483,7 +482,17 @@ abstract class VMInvokable extends VMObject {
 					}
 					for (const ndx in this.params) {
 						const name = this.params[ndx];
-						const value = args[ndx];
+						const initExpr = this.paramInitializers[ndx];
+
+						let value = args[ndx];
+						if (
+							value === undefined && initExpr !== undefined && initExpr !== null
+						) {
+							value = vm.evalExpr(initExpr);
+						}
+
+						if (value === undefined) value = { type: "undefined" };
+
 						vm.setVar(name, value);
 					}
 				}
@@ -2319,13 +2328,37 @@ export class VM {
 		bodyNode: Node,
 		options: FnBuildOptions = {},
 	) {
-		const params = paramNodes.map((paramNode) => {
-			assert(
-				paramNode.type === "Identifier",
-				"unsupported: func params of type " + paramNode.type,
-			);
-			return (<acorn.Identifier> paramNode).name;
-		});
+		const paramInitializers: VMFunction["paramInitializers"] = [];
+		const params: string[] = [];
+
+		for (const paramNode of paramNodes) {
+			switch (paramNode.type) {
+				case "Identifier":
+					params.push((<acorn.Identifier> paramNode).name);
+					paramInitializers.push(null);
+					break;
+
+				case "AssignmentPattern": {
+					const pattern = <acorn.AssignmentPattern> paramNode;
+					assert(
+						pattern.left.type === "Identifier",
+						"only supported: Identifier as param assignment pattern lhs",
+					);
+					params.push(pattern.left.name);
+					paramInitializers.push(pattern.right);
+					break;
+				}
+				default:
+					throw new AssertionError(
+						"unsupported: func params of type " + paramNode.type,
+					);
+			}
+		}
+
+		assert(
+			params.length === paramInitializers.length,
+			"bug: params and initializers in different number",
+		);
 
 		// TODO Is there a better way?
 		// I'm telling TypeScript to trust me on the bodyNode being BlockStatement,
@@ -2367,6 +2400,7 @@ export class VM {
 		);
 		assert(this.currentScope !== null, "there must be a scope");
 		const func = new VMFunction(params, bodyBlock, this.currentScope);
+		func.paramInitializers = paramInitializers;
 		if (!options.scopeStrictnessIrrelevant && this.currentScope.isStrict()) {
 			func.isStrict = true;
 		}

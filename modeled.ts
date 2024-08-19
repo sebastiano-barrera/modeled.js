@@ -1380,6 +1380,8 @@ export class VM {
 				}
 
 				case "DoWhileStatement": {
+					this.completionValue = { type: "undefined" };
+
 					this.catchBreak(details?.label, () => {
 						do {
 							this.catchContinue(details?.label, () => {
@@ -1395,6 +1397,8 @@ export class VM {
 				}
 
 				case "SwitchStatement": {
+					this.completionValue = { type: "undefined" };
+
 					const discriminant = this.evalExpr(stmt.discriminant);
 
 					// figure out which case label we're jumping to...

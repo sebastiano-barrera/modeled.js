@@ -1192,6 +1192,8 @@ export class VM {
 					if (stmt.type === "Program") {
 						scope = new EnvVarScope(this.globalObj);
 						scope.this = this.globalObj;
+						scope.defineVar("globalThis", { allowRedecl: true });
+						scope.setVar("globalThis", this.globalObj, this);
 						if (
 							stmt.body.length > 0 &&
 							stmt.body[0].type === "ExpressionStatement" &&

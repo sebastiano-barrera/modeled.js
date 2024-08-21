@@ -1087,7 +1087,7 @@ export class VM {
 
 		if (ast.bindings) {
 			for (const name of ast.bindings.keys()) {
-				if (this.lookupVar(name) !== undefined) {
+				if (this.lookupVar(name, { noParent: true }) !== undefined) {
 					return this.throwError(
 						"SyntaxError",
 						"definition in eval shadows existing definition",
@@ -1095,7 +1095,7 @@ export class VM {
 				}
 			}
 		}
-		
+
 		return this.withCompletionValue(() =>
 			this.nestScope(() => {
 				return this.runBlock(ast);

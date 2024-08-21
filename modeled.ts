@@ -173,7 +173,10 @@ class VMObject {
 
 	resolveDescriptor(descriptor: Descriptor, vm?: VM) {
 		if (descriptor.get !== undefined) {
-			assert(vm instanceof VM, "looking up described value but vm not passed");
+			assert(
+				vm instanceof VM,
+				"looking up described value but vm not passed",
+			);
 
 			// in a literal call to the getter (`obj.getter()`), after the `obj.getter`
 			// lookup, the CallExpression handler would decide whether to coerce `this` to
@@ -264,17 +267,26 @@ class VMObject {
 			if (descriptor.discardWriteSilently) {
 				return;
 			}
-			assert(vm instanceof VM, "looking up described value but vm not passed");
+			assert(
+				vm instanceof VM,
+				"looking up described value but vm not passed",
+			);
 			return vm.throwError("TypeError", "property is not writable");
 		}
 
 		if (descriptor.set) {
-			assert(vm instanceof VM, "looking up described value but vm not passed");
+			assert(
+				vm instanceof VM,
+				"looking up described value but vm not passed",
+			);
 			return vm.performCall(descriptor.set, this, [value]);
 		} else if (descriptor.get === undefined) {
 			descriptor.value = value;
 		} else {
-			assert(vm instanceof VM, "looking up described value but vm not passed");
+			assert(
+				vm instanceof VM,
+				"looking up described value but vm not passed",
+			);
 			// we have a getter but not a setter
 			vm.throwError("TypeError", "descriptor has getter but no setter");
 		}
@@ -442,7 +454,12 @@ abstract class VMInvokable extends VMObject {
 		invokeOpts: InvokeOpts,
 	): JSValue;
 
-	invoke(vm: VM, subject: JSValue, args: JSValue[], options: InvokeOpts = {}) {
+	invoke(
+		vm: VM,
+		subject: JSValue,
+		args: JSValue[],
+		options: InvokeOpts = {},
+	) {
 		// true iff this invocation comes from new Constructor(...)
 		const isNew = options.isNew || false;
 
@@ -470,6 +487,11 @@ abstract class VMInvokable extends VMObject {
 				vm.currentScope.isCallWrapper = true;
 				vm.currentScope.isSetStrict = this.isStrict;
 
+				// arguments MUST be already defined before we start evaluating
+				// default initializers, because one of these might try to redefine
+				// `arguments` within an eval expr...
+				vm.defineVar("arguments", { allowRedecl: true });
+
 				// not all subclasses have named params
 				if (this.params !== undefined) {
 					// #func-param-define
@@ -486,7 +508,8 @@ abstract class VMInvokable extends VMObject {
 
 						let value = args[ndx];
 						if (
-							value === undefined && initExpr !== undefined && initExpr !== null
+							value === undefined && initExpr !== undefined &&
+							initExpr !== null
 						) {
 							value = vm.evalExpr(initExpr);
 						}
@@ -497,7 +520,6 @@ abstract class VMInvokable extends VMObject {
 					}
 				}
 
-				vm.defineVar("arguments", { allowRedecl: true });
 				vm.setVar("arguments", () => {
 					const argumentsArray = new VMArray();
 					argumentsArray.isArgsArray = true;
@@ -683,7 +705,9 @@ class VarScope extends Scope {
 		if (!this.vars.has(name)) {
 			let value: "TDZ" | JSValue = "TDZ";
 
-			if (defineOptions.defaultValue !== undefined && !this.vars.has(name)) {
+			if (
+				defineOptions.defaultValue !== undefined && !this.vars.has(name)
+			) {
 				value = defineOptions.defaultValue;
 			}
 
@@ -746,7 +770,10 @@ class EnvScope extends Scope {
 
 	defineVar(name: string, options: DefineOptions): void {
 		if (!options.allowAsGlobalObjectProperty) {
-			throw new ExceptionRequest("SyntaxError", "nyi: let/const at toplevel");
+			throw new ExceptionRequest(
+				"SyntaxError",
+				"nyi: let/const at toplevel",
+			);
 		}
 
 		if (!options.allowRedecl && this.env.containsOwnProperty(name)) {
@@ -763,7 +790,11 @@ class EnvScope extends Scope {
 			writable: true,
 		});
 	}
-	setVar(name: string, valueOrThunk: JSValue | (() => JSValue), vm?: VM): void {
+	setVar(
+		name: string,
+		valueOrThunk: JSValue | (() => JSValue),
+		vm?: VM,
+	): void {
 		assert(
 			vm instanceof VM,
 			"bug: vm not passed (required to throw ReferenceError)",
@@ -979,6 +1010,7 @@ export class VM {
 		assert(node.sourceType === "script", "only script is supported");
 		assert(this.currentScope === null, "nested program!");
 
+		//
 		hoistDeclarations(node);
 
 		try {
@@ -1029,7 +1061,7 @@ export class VM {
 	}
 
 	directEval(text: string) {
-		let ast;
+		let ast: acorn.Program & Node;
 		try {
 			ast = acorn.parse(text, {
 				ecmaVersion: "latest",
@@ -1051,8 +1083,23 @@ export class VM {
 			"result of parser is expected to be a Program",
 		);
 
+		hoistDeclarations(ast);
+
+		if (ast.bindings) {
+			for (const name of ast.bindings.keys()) {
+				if (this.lookupVar(name) !== undefined) {
+					return this.throwError(
+						"SyntaxError",
+						"definition in eval shadows existing definition",
+					);
+				}
+			}
+		}
+		
 		return this.withCompletionValue(() =>
-			this.nestScope(() => this.runBlock(ast))
+			this.nestScope(() => {
+				return this.runBlock(ast);
+			})
 		);
 	}
 
@@ -1113,6 +1160,8 @@ export class VM {
 	}): void {
 		return this.#withSyntaxContext(node, () => {
 			const scope = this.currentScope;
+			// `scope` is only allowed to be null for node.type === 'Program'
+			// (null when running a script; !null when running eval)
 			assert(node.type === "Program" || scope !== null, "!");
 
 			if (node.bindings || node.functionDecls) {
@@ -1177,7 +1226,8 @@ export class VM {
 								"parser bug: try statement's handler must be CatchClause",
 							);
 							assert(
-								stmt.handler.param !== null && stmt.handler.param !== undefined,
+								stmt.handler.param !== null &&
+									stmt.handler.param !== undefined,
 								"unsuppored: handler without param",
 							);
 							assert(
@@ -1202,8 +1252,13 @@ export class VM {
 						}
 					} finally {
 						this.nestScope(() => {
-							if (stmt.finalizer !== null && stmt.finalizer !== undefined) {
-								return this.runStmt(stmt.finalizer, { noBreak: true });
+							if (
+								stmt.finalizer !== null &&
+								stmt.finalizer !== undefined
+							) {
+								return this.runStmt(stmt.finalizer, {
+									noBreak: true,
+								});
 							}
 						});
 					}
@@ -1243,9 +1298,12 @@ export class VM {
 
 				case "VariableDeclaration": {
 					if (
-						stmt.kind !== "var" && stmt.kind !== "let" && stmt.kind !== "const"
+						stmt.kind !== "var" && stmt.kind !== "let" &&
+						stmt.kind !== "const"
 					) {
-						throw new AssertionError("unsupported var decl type: " + stmt.kind);
+						throw new AssertionError(
+							"unsupported var decl type: " + stmt.kind,
+						);
 					}
 
 					for (const decl of stmt.declarations) {
@@ -1269,7 +1327,8 @@ export class VM {
 							}
 						} else {
 							throw new AssertionError(
-								"unsupported declarator id type: " + decl.id.type,
+								"unsupported declarator id type: " +
+									decl.id.type,
 							);
 						}
 					}
@@ -1324,10 +1383,16 @@ export class VM {
 								this.completionValue = { type: "undefined" };
 								this.catchContinue(
 									details?.label,
-									() => this.runStmt(stmt.body, { noBreak: true }),
+									() =>
+										this.runStmt(stmt.body, {
+											noBreak: true,
+										}),
 								);
 
-								if (stmt.update !== null && stmt.update !== undefined) {
+								if (
+									stmt.update !== null &&
+									stmt.update !== undefined
+								) {
 									this.evalExpr(stmt.update);
 								}
 							}
@@ -1338,7 +1403,10 @@ export class VM {
 				case "ForInStatement": {
 					const iteree = this.evalExpr(stmt.right);
 
-					assert(iteree instanceof VMObject, "only supported: object iteree");
+					assert(
+						iteree instanceof VMObject,
+						"only supported: object iteree",
+					);
 					const properties = iteree.getOwnEnumerablePropertyNames();
 					this.catchBreak(details?.label, () => {
 						for (const name of properties) {
@@ -1353,9 +1421,12 @@ export class VM {
 								if (stmt.left.type === "VariableDeclaration") {
 									assert(
 										stmt.left.declarations.length === 1 &&
-											stmt.left.declarations[0].type === "VariableDeclarator" &&
-											stmt.left.declarations[0].init === null &&
-											stmt.left.declarations[0].id.type === "Identifier",
+											stmt.left.declarations[0].type ===
+												"VariableDeclarator" &&
+											stmt.left.declarations[0].init ===
+												null &&
+											stmt.left.declarations[0].id
+													.type === "Identifier",
 										"only supported: single declaration with no init and a simple identifier as the pattern",
 									);
 									this.runStmt(stmt.left);
@@ -1385,7 +1456,9 @@ export class VM {
 										stmt.body.type === "BlockStatement",
 										"for(x in y) body: body must be block statement",
 									);
-									this.runBlock(stmt.body, { breakable: false });
+									this.runBlock(stmt.body, {
+										breakable: false,
+									});
 								});
 							});
 						}
@@ -1424,7 +1497,9 @@ export class VM {
 								);
 								this.runBlock(stmt.body, { breakable: false });
 							});
-						} while (this.coerceToBoolean(this.evalExpr(stmt.test)));
+						} while (
+							this.coerceToBoolean(this.evalExpr(stmt.test))
+						);
 					});
 					return;
 				}
@@ -1441,10 +1516,13 @@ export class VM {
 					for (let i = 0; i < caseCount; i++) {
 						const branch = stmt.cases[i];
 						if (
-							typeof branch.test === "object" && branch.test !== null
+							typeof branch.test === "object" &&
+							branch.test !== null
 						) {
 							const testValue = this.evalExpr(branch.test);
-							if (this.tripleEqualValues(discriminant, testValue)) {
+							if (
+								this.tripleEqualValues(discriminant, testValue)
+							) {
 								caseIndex = i;
 								break;
 							}
@@ -1464,7 +1542,10 @@ export class VM {
 								this.doHoistedDeclarations(stmt);
 
 								for (let i = caseIndex; i < caseCount; i++) {
-									for (const substmt of stmt.cases[i].consequent) {
+									for (
+										const substmt of stmt.cases[i]
+											.consequent
+									) {
 										this.runStmt(substmt);
 									}
 								}
@@ -1481,7 +1562,9 @@ export class VM {
 					);
 
 				default:
-					throw new AssertionError("not a (supported) statement: " + stmt.type);
+					throw new AssertionError(
+						"not a (supported) statement: " + stmt.type,
+					);
 			}
 		});
 	}
@@ -1543,7 +1626,10 @@ export class VM {
 		}
 	}
 
-	catchContinue<T>(label: string | undefined, action: () => T): T | undefined {
+	catchContinue<T>(
+		label: string | undefined,
+		action: () => T,
+	): T | undefined {
 		try {
 			return action();
 		} catch (e) {
@@ -1615,7 +1701,10 @@ export class VM {
 					);
 				}
 
-				this.doAssignment(expressionToPattern(expr.argument), valuePost);
+				this.doAssignment(
+					expressionToPattern(expr.argument),
+					valuePost,
+				);
 
 				if (expr.prefix) return valuePost;
 				return valuePre;
@@ -1649,7 +1738,9 @@ export class VM {
 					let key: PropName;
 					if (propertyNode.computed === true) {
 						const keyVal = this.evalExpr(propertyNode.key);
-						if (keyVal.type !== "string" && keyVal.type !== "symbol") {
+						if (
+							keyVal.type !== "string" && keyVal.type !== "symbol"
+						) {
 							this.throwError(
 								"TypeError",
 								"only string and symbol are allowed as object keys",
@@ -1668,7 +1759,8 @@ export class VM {
 						const value = this.evalExpr(propertyNode.value);
 						obj.setProperty(key, value);
 					} else if (
-						propertyNode.kind === "get" || propertyNode.kind === "set"
+						propertyNode.kind === "get" ||
+						propertyNode.kind === "set"
 					) {
 						const func = this.evalExpr(propertyNode.value);
 						if (!(func instanceof VMInvokable)) {
@@ -1695,7 +1787,10 @@ export class VM {
 			case "ArrayExpression": {
 				const array = new VMArray();
 				array.arrayElements = expr.elements.map((elmNode) => {
-					assert(elmNode !== null, "unexpected null in array expression");
+					assert(
+						elmNode !== null,
+						"unexpected null in array expression",
+					);
 					assert(
 						elmNode.type !== "SpreadElement",
 						"unsupported: [...spread] syntax in array literal",
@@ -1706,7 +1801,10 @@ export class VM {
 			}
 
 			case "MemberExpression": {
-				assert(!expr.optional, "unsupported: MemberExpression.optional");
+				assert(
+					!expr.optional,
+					"unsupported: MemberExpression.optional",
+				);
 
 				assert(expr.object.type !== "Super", "unsupported: super(...)");
 				const object = this.coerceToObject(this.evalExpr(expr.object));
@@ -1724,7 +1822,8 @@ export class VM {
 						val = object.getIndex(key.value);
 					} else {
 						throw new AssertionError(
-							"MemberExpression: unsupported key type: " + key.type,
+							"MemberExpression: unsupported key type: " +
+								key.type,
 						);
 					}
 				} else if (expr.property.type === "Identifier") {
@@ -1762,9 +1861,13 @@ export class VM {
 							"unsupported: private identifiers",
 						);
 						if (expr.argument.computed) {
-							const nameValue = this.evalExpr(expr.argument.property);
+							const nameValue = this.evalExpr(
+								expr.argument.property,
+							);
 							if (nameValue.type !== "string") {
-								this.throwTypeError("property type is not string");
+								this.throwTypeError(
+									"property type is not string",
+								);
 							}
 							property = nameValue.value;
 						} else {
@@ -1779,7 +1882,8 @@ export class VM {
 						return { type: "boolean", value: ret };
 					} else {
 						throw new AssertionError(
-							"unsupported delete argument: " + expr.argument.type,
+							"unsupported delete argument: " +
+								expr.argument.type,
 						);
 					}
 				} else if (expr.operator === "typeof") {
@@ -1801,11 +1905,18 @@ export class VM {
 						return { type: "string", value: value.type };
 					}
 				} else if (expr.operator === "!") {
-					assert(expr.prefix === true, "only supported: expr.prefix === true");
-					const value = this.coerceToBoolean(this.evalExpr(expr.argument));
+					assert(
+						expr.prefix === true,
+						"only supported: expr.prefix === true",
+					);
+					const value = this.coerceToBoolean(
+						this.evalExpr(expr.argument),
+					);
 					return { type: "boolean", value: !value };
 				} else if (expr.operator === "+") {
-					const value = this.coerceToNumeric(this.evalExpr(expr.argument));
+					const value = this.coerceToNumeric(
+						this.evalExpr(expr.argument),
+					);
 					switch (typeof value) {
 						case "number":
 							return { type: "number", value };
@@ -1815,13 +1926,17 @@ export class VM {
 							return { type: "undefined" };
 					}
 				} else if (expr.operator === "-") {
-					const value = this.coerceToNumeric(this.evalExpr(expr.argument));
+					const value = this.coerceToNumeric(
+						this.evalExpr(expr.argument),
+					);
 					if (typeof value === "number") {
 						return { type: "number", value: -value };
 					}
 					return { type: "bigint", value: -value };
 				} else if (expr.operator === "~") {
-					const value = this.coerceToNumeric(this.evalExpr(expr.argument));
+					const value = this.coerceToNumeric(
+						this.evalExpr(expr.argument),
+					);
 					if (typeof value === "number") {
 						return { type: "number", value: ~value };
 					}
@@ -1831,7 +1946,9 @@ export class VM {
 					this.evalExpr(expr.argument);
 					return { type: "undefined" };
 				} else {
-					throw new AssertionError("unsupported unary op: " + expr.operator);
+					throw new AssertionError(
+						"unsupported unary op: " + expr.operator,
+					);
 				}
 			}
 
@@ -1858,7 +1975,9 @@ export class VM {
 					}
 					return left;
 				} else {
-					throw new AssertionError("unsupported logical op: " + expr.operator);
+					throw new AssertionError(
+						"unsupported logical op: " + expr.operator,
+					);
 				}
 			}
 
@@ -1873,7 +1992,10 @@ export class VM {
 			case "NewExpression": {
 				const constructor = this.evalExpr(expr.callee);
 				if (!(constructor instanceof VMInvokable)) {
-					this.throwError("TypeError", "constructor must be callable");
+					this.throwError(
+						"TypeError",
+						"constructor must be callable",
+					);
 				}
 				const args = expr.arguments.map((argNode) => {
 					assert(
@@ -1929,7 +2051,8 @@ export class VM {
 						}
 					}
 				} else if (
-					expr.callee.type === "Identifier" && expr.callee.name === "eval"
+					expr.callee.type === "Identifier" &&
+					expr.callee.name === "eval"
 				) {
 					// don't lookup "eval" as a variable, perform "direct eval"
 
@@ -1979,7 +2102,10 @@ export class VM {
 
 				const value = this.accessVar(expr.name);
 				if (value === undefined) {
-					this.throwError("ReferenceError", "unbound variable: " + expr.name);
+					this.throwError(
+						"ReferenceError",
+						"unbound variable: " + expr.name,
+					);
 				}
 
 				return value;
@@ -2030,12 +2156,16 @@ export class VM {
 				for (let i = 0; i < expr.expressions.length - 1; i++) {
 					this.evalExpr(expr.expressions[i]);
 				}
-				return this.evalExpr(expr.expressions[expr.expressions.length - 1]);
+				return this.evalExpr(
+					expr.expressions[expr.expressions.length - 1],
+				);
 
 			case "ArrowFunctionExpression": {
 				// similar to Object.prototype.bind
 				assert(this.currentScope !== null, "there must be a scope");
-				const outerThis = this.currentScope.getThisValue(this.globalObj);
+				const outerThis = this.currentScope.getThisValue(
+					this.globalObj,
+				);
 				const func = this.defineFunction(expr);
 				return nativeVMFunc((vm: VM, _: JSValue, args: JSValue[]) => {
 					// force subject to be this inner subject passed here
@@ -2115,7 +2245,9 @@ export class VM {
 		else if (operator === "&") return this.arithmeticOp("&", left, right);
 		else if (operator === "|") return this.arithmeticOp("|", left, right);
 		else if (operator === "%") return this.arithmeticOp("%", left, right);
-		else if (operator === ">>>") return this.arithmeticOp(">>>", left, right);
+		else if (operator === ">>>") {
+			return this.arithmeticOp(">>>", left, right);
+		}
 
 		const ap = this.coerceToPrimitive(this.evalExpr(left));
 		const bp = this.coerceToPrimitive(this.evalExpr(right));
@@ -2401,7 +2533,9 @@ export class VM {
 		assert(this.currentScope !== null, "there must be a scope");
 		const func = new VMFunction(params, bodyBlock, this.currentScope);
 		func.paramInitializers = paramInitializers;
-		if (!options.scopeStrictnessIrrelevant && this.currentScope.isStrict()) {
+		if (
+			!options.scopeStrictnessIrrelevant && this.currentScope.isStrict()
+		) {
 			func.isStrict = true;
 		}
 
@@ -2421,7 +2555,9 @@ export class VM {
 
 	isTruthy(jsv: JSValue) {
 		if (jsv.type === "object") {
-			throw new AssertionError("not yet implemented: isTruthy for object");
+			throw new AssertionError(
+				"not yet implemented: isTruthy for object",
+			);
 		}
 
 		if (jsv.type === "boolean") return jsv.value;
@@ -2503,7 +2639,9 @@ export class VM {
 				obj.setIndex(property.value, value);
 			} else {
 				let propertyName: string | symbol;
-				if (!(property.type === "string" || property.type === "symbol")) {
+				if (
+					!(property.type === "string" || property.type === "symbol")
+				) {
 					propertyName = this.coerceToString(property);
 				} else {
 					propertyName = property.value;
@@ -2677,13 +2815,16 @@ export class VM {
 				) {
 					assert(right.type === left.type, "(for typescript)");
 					result = left.value === right.value;
-				} else throw new AssertionError("invalid value type: " + left.type);
+				} else {throw new AssertionError(
+						"invalid value type: " + left.type,
+					);}
 
 				return result;
 			}
 
 			const leftIsUN = left.type === "undefined" || left.type === "null";
-			const rightIsUN = right.type === "undefined" || right.type === "null";
+			const rightIsUN = right.type === "undefined" ||
+				right.type === "null";
 			if (leftIsUN || rightIsUN) {
 				return leftIsUN && rightIsUN;
 			}
@@ -2770,7 +2911,9 @@ export class VM {
 				if (method instanceof VMInvokable) {
 					const ret = method.invoke(this, value, args);
 					// primitive: can be used
-					if (!(ret instanceof VMObject) && ret.type !== "undefined") {
+					if (
+						!(ret instanceof VMObject) && ret.type !== "undefined"
+					) {
 						prim = ret;
 					}
 				} else {
@@ -2778,7 +2921,10 @@ export class VM {
 				}
 			};
 
-			tryCall(symToPrimitive.value, [{ type: "string", value: "default" }]);
+			tryCall(symToPrimitive.value, [{
+				type: "string",
+				value: "default",
+			}]);
 			if (order === "valueOf first") {
 				tryCall("valueOf", []);
 				tryCall("toString", []);
@@ -2896,8 +3042,9 @@ export class VM {
 		else {
 			if (value.type === "string") str = value.value;
 			else if (value.type === "undefined") str = "undefined";
-			else if (value.type === "boolean") str = value.value ? "true" : "false";
-			else if (value.type === "number") {
+			else if (value.type === "boolean") {
+				str = value.value ? "true" : "false";
+			} else if (value.type === "number") {
 				str = Number.prototype.toString.call(value.value);
 			} else if (value.type === "bigint") {
 				str = BigInt.prototype.toString.call(value.value);
@@ -2989,7 +3136,9 @@ function createRegExpFromNative(vm: VM, innerRE: RegExp): VMRegExp {
 			assertIsVMRegExp(vm, subject);
 			const arg = args[0] || { type: "undefined" };
 			if (arg.type !== "number") {
-				return vm.throwTypeError("property lastIndex must be set to a number");
+				return vm.throwTypeError(
+					"property lastIndex must be set to a number",
+				);
 			}
 			subject.innerRE.lastIndex = arg.value;
 			return { type: "undefined" };
@@ -3005,21 +3154,29 @@ function createRegExpFromNative(vm: VM, innerRE: RegExp): VMRegExp {
 function initBuiltins(realm: Realm) {
 	realm.PROTO_FUNCTION.setProperty(
 		"bind",
-		nativeVMFunc((vm: VM, outerInvokableValue: JSValue, args: JSValue[]) => {
-			const forcedSubject = args[0] || { type: "undefined" };
-			const outerInvokable = vm.coerceToObject(outerInvokableValue);
-			if (outerInvokable instanceof VMInvokable) {
-				return nativeVMFunc((vm: VM, _: JSValue, args: JSValue[]) => {
-					// force subject to be this inner subject passed here
-					return outerInvokable.invoke(vm, forcedSubject, args);
-				});
-			}
+		nativeVMFunc(
+			(vm: VM, outerInvokableValue: JSValue, args: JSValue[]) => {
+				const forcedSubject = args[0] || { type: "undefined" };
+				const outerInvokable = vm.coerceToObject(outerInvokableValue);
+				if (outerInvokable instanceof VMInvokable) {
+					return nativeVMFunc(
+						(vm: VM, _: JSValue, args: JSValue[]) => {
+							// force subject to be this inner subject passed here
+							return outerInvokable.invoke(
+								vm,
+								forcedSubject,
+								args,
+							);
+						},
+					);
+				}
 
-			return vm.throwError(
-				"TypeError",
-				"Function.prototype.bind: 'this' is not a function",
-			);
-		}),
+				return vm.throwError(
+					"TypeError",
+					"Function.prototype.bind: 'this' is not a function",
+				);
+			},
+		),
 	);
 	realm.PROTO_FUNCTION.setProperty(
 		"call",
@@ -3182,13 +3339,19 @@ function initBuiltins(realm: Realm) {
 
 			let retStr;
 			if (arg1.type === "string") {
-				retStr = subject.primitive.value.replace(arg0.value, arg1.value);
+				retStr = subject.primitive.value.replace(
+					arg0.value,
+					arg1.value,
+				);
 			} else if (arg1 instanceof VMInvokable) {
 				retStr = subject.primitive.value.replace(arg0.value, () => {
-					const ret = vm.performCall(arg1, { type: "undefined" }, [arg0]);
+					const ret = vm.performCall(arg1, { type: "undefined" }, [
+						arg0,
+					]);
 					if (ret.type !== "string") {
 						return vm.throwTypeError(
-							"invalid return value from passed function: " + ret.type,
+							"invalid return value from passed function: " +
+								ret.type,
 						);
 					}
 					return ret.value;
@@ -3317,8 +3480,14 @@ function initBuiltins(realm: Realm) {
 			for (const item of nativeRet) {
 				ret.arrayElements.push({ type: "string", value: item });
 			}
-			ret.setProperty("index", { type: "number", value: nativeRet.index });
-			ret.setProperty("input", { type: "string", value: nativeRet.input });
+			ret.setProperty("index", {
+				type: "number",
+				value: nativeRet.index,
+			});
+			ret.setProperty("input", {
+				type: "string",
+				value: nativeRet.input,
+			});
 
 			if (typeof nativeRet.groups === "object") {
 				const groups = new VMObject();
@@ -3428,7 +3597,10 @@ function initGlobalObject(G: VMObject): void {
 
 			// descriptorValue is a VM value
 			if (descriptor.type !== "object") {
-				return vm.throwError("TypeError", "invalid descriptor: not an object");
+				return vm.throwError(
+					"TypeError",
+					"invalid descriptor: not an object",
+				);
 			}
 
 			let getter: VMInvokable | undefined;
@@ -3437,13 +3609,17 @@ function initGlobalObject(G: VMObject): void {
 				descriptor.containsOwnProperty("get") ||
 				descriptor.containsOwnProperty("set")
 			) {
-				const checkFunc = (key: "get" | "set"): VMInvokable | undefined => {
+				const checkFunc = (
+					key: "get" | "set",
+				): VMInvokable | undefined => {
 					let value = descriptor.getProperty(key);
 					if (value !== undefined && value.type === "undefined") {
 						value = undefined;
 					}
 
-					if (value !== undefined && !(value instanceof VMInvokable)) {
+					if (
+						value !== undefined && !(value instanceof VMInvokable)
+					) {
 						return vm.throwError(
 							"TypeError",
 							`invalid descriptor: '${key}' is not a function`,
@@ -3488,7 +3664,9 @@ function initGlobalObject(G: VMObject): void {
 	consObject.setProperty(
 		"getOwnPropertyDescriptor",
 		nativeVMFunc((vm, _subject, args) => {
-			const obj: VMObject = vm.coerceToObject(args[0] || { type: "undefined" });
+			const obj: VMObject = vm.coerceToObject(
+				args[0] || { type: "undefined" },
+			);
 			const name = args[1];
 			if (name === undefined || name.type === "undefined") {
 				return { type: "undefined" };
@@ -3533,11 +3711,16 @@ function initGlobalObject(G: VMObject): void {
 	consObject.setProperty(
 		"getOwnPropertyNames",
 		nativeVMFunc((vm, _subject, args) => {
-			const obj: VMObject = vm.coerceToObject(args[0] || { type: "undefined" });
+			const obj: VMObject = vm.coerceToObject(
+				args[0] || { type: "undefined" },
+			);
 			const names = obj.getOwnPropertyNames();
 			const ret = new VMArray();
 			for (const name of names) {
-				assert(typeof name === "string", "unsuppored: symbol properties");
+				assert(
+					typeof name === "string",
+					"unsuppored: symbol properties",
+				);
 				ret.arrayElements.push({ type: "string", value: name });
 			}
 			return ret;
@@ -3679,7 +3862,10 @@ function initGlobalObject(G: VMObject): void {
 			if (typeof value === "bigint") {
 				return { type: "bigint", value };
 			}
-			return vm.throwError("SyntaxError", "can't convert to value to bigint");
+			return vm.throwError(
+				"SyntaxError",
+				"can't convert to value to bigint",
+			);
 		}),
 	);
 
@@ -3709,7 +3895,8 @@ function initGlobalObject(G: VMObject): void {
 
 			if (arg.type !== "number") {
 				return vm.throwTypeError(
-					"String.fromCharCode requires a numeric code point, not " + arg.type,
+					"String.fromCharCode requires a numeric code point, not " +
+						arg.type,
 				);
 			}
 
@@ -3782,7 +3969,9 @@ function initGlobalObject(G: VMObject): void {
 			body,
 			type: "BlockStatement",
 		};
-		return vm.makeFunction([], blockStmt, { scopeStrictnessIrrelevant: true });
+		return vm.makeFunction([], blockStmt, {
+			scopeStrictnessIrrelevant: true,
+		});
 	}, { isConstructor: true });
 	G.setProperty("Function", consFunction);
 	consFunction.setProperty("prototype", R().PROTO_FUNCTION);
@@ -3790,7 +3979,9 @@ function initGlobalObject(G: VMObject): void {
 	const consRegExp = nativeVMFunc((vm, _subject, args) => {
 		const arg = args[0];
 		if (arg.type !== "string") {
-			return vm.throwTypeError("RegExp constructor argument must be string");
+			return vm.throwTypeError(
+				"RegExp constructor argument must be string",
+			);
 		}
 		return createRegExpFromNative(vm, new RegExp(arg.value));
 	}, { isConstructor: true });
@@ -3805,7 +3996,10 @@ function initGlobalObject(G: VMObject): void {
 
 			// the comments are from:
 			// https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/eval
-			assert(vm.currentScope instanceof Scope, "there must be a scope here");
+			assert(
+				vm.currentScope instanceof Scope,
+				"there must be a scope here",
+			);
 			const rootScope = vm.currentScope.getRoot();
 			return vm.switchScope(rootScope, () => {
 				// Indirect eval works in the global scope rather than the local
@@ -3824,7 +4018,9 @@ function initGlobalObject(G: VMObject): void {
 				}
 
 				if (args[0].type !== "string") {
-					return vm.throwTypeError("eval must be called with a string");
+					return vm.throwTypeError(
+						"eval must be called with a string",
+					);
 				}
 
 				return vm.directEval(args[0].value);
@@ -3927,7 +4123,11 @@ function expressionToPattern(argument: acorn.Expression): acorn.Pattern {
 // the outermost node where the declaration is bound.
 function hoistDeclarations(node: Node) {
 	acornWalk.ancestor(node, {
-		FunctionDeclaration(node: acorn.FunctionDeclaration, _state, ancestors) {
+		FunctionDeclaration(
+			node: acorn.FunctionDeclaration,
+			_state,
+			ancestors,
+		) {
 			assert(
 				ancestors[ancestors.length - 1] === node,
 				"unexpected: ancestors[last] is not node",
@@ -3944,7 +4144,11 @@ function hoistDeclarations(node: Node) {
 			});
 		},
 
-		VariableDeclaration(node: acorn.VariableDeclaration, _state, ancestors) {
+		VariableDeclaration(
+			node: acorn.VariableDeclaration,
+			_state,
+			ancestors,
+		) {
 			assert(
 				ancestors[ancestors.length - 1] === node,
 				"unexpected: ancestors[last] is not node",

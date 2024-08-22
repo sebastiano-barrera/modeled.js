@@ -1061,6 +1061,12 @@ export class VM {
 	}
 
 	directEval(text: string) {
+		assert (this.currentScope !== null, "");
+
+		if (!this.currentScope.isStrict()) {
+			throw new ArbitrarilyLeftUnimplemented("eval is only supported in strict mode");
+		}
+
 		let ast: acorn.Program & Node;
 		try {
 			ast = acorn.parse(text, {
@@ -1084,17 +1090,6 @@ export class VM {
 		);
 
 		hoistDeclarations(ast);
-
-		if (ast.bindings) {
-			for (const name of ast.bindings.keys()) {
-				if (this.lookupVar(name, { noParent: true }) !== undefined) {
-					return this.throwError(
-						"SyntaxError",
-						"definition in eval shadows existing definition",
-					);
-				}
-			}
-		}
 
 		return this.withCompletionValue(() =>
 			this.nestScope(() => {

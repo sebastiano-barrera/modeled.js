@@ -4015,9 +4015,7 @@ function initGlobalObject(G: VMObject): void {
 				}
 
 				if (args[0].type !== "string") {
-					return vm.throwTypeError(
-						"eval must be called with a string",
-					);
+					return args[0];
 				}
 
 				return vm.directEval(args[0].value);

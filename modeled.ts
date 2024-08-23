@@ -1006,7 +1006,7 @@ export class VM {
 			return { outcome: "success" };
 		} catch (origError) {
 			let error = origError;
-			
+
 			// acorn throws a builtin SyntaxError; we convert it into a guest SyntaxError
 			if (error instanceof SyntaxError) {
 				error = this.makeError(
@@ -3273,6 +3273,28 @@ function initBuiltins(realm: Realm) {
 			return { type: "string", value };
 		}),
 	);
+	realm.PROTO_FUNCTION.defineProperty("arguments", {
+		get: nativeVMFunc((vm, _subject, _args) => {
+			return vm.throwError(
+				"TypeError",
+				"reading Function's property `arguments` is forbidden",
+			);
+		}),
+		configurable: false,
+		enumerable: false,
+		writable: false,
+	});
+	realm.PROTO_FUNCTION.defineProperty("caller", {
+		get: nativeVMFunc((vm, _subject, _args) => {
+			return vm.throwError(
+				"TypeError",
+				"reading Function's property `caller` is forbidden",
+			);
+		}),
+		configurable: false,
+		enumerable: false,
+		writable: false,
+	});
 
 	realm.PROTO_OBJECT.setProperty(
 		"toString",

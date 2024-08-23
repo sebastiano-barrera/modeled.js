@@ -1004,7 +1004,9 @@ export class VM {
 
 			this.runProgram(ast);
 			return { outcome: "success" };
-		} catch (error) {
+		} catch (origError) {
+			let error = origError;
+			
 			// acorn throws a builtin SyntaxError; we convert it into a guest SyntaxError
 			if (error instanceof SyntaxError) {
 				error = this.makeError(
@@ -1188,11 +1190,8 @@ export class VM {
 
 			if (node.bindings || node.functionDecls) {
 				assert(
-					node.type === "Program" ||
-						node.type === "BlockStatement" ||
-						node.type === "ForInStatement" ||
-						node.type === "SwitchStatement",
-					"hoist bug:variable declarations can only be attached to Program and BlockStatement nodes",
+					NODE_TYPES_WITH_BINDINGS.includes(node.type),
+					`hoist bug: variable declarations can't be attached ${node.type} nodes`,
 				);
 			}
 
@@ -4197,13 +4196,20 @@ const RESERVED_WORDS = new Set([
 	"yield",
 ]);
 
+const NODE_TYPES_WITH_BINDINGS = [
+	"Program",
+	"BlockStatement",
+	"ForInStatement",
+	"SwitchStatement",
+];
+
 /**
  * Scan the given node and its children recursively. Hoist all declarations:
  * as a consequence, every declaration is added to the `bindings` list of
  * the outermost node where the declaration is bound.
  */
 function hoistDeclarations(node: Node) {
-	acornWalk.ancestor(node, {
+	const visitor: acornWalk.AncestorVisitors<acorn.Node> = {
 		FunctionDeclaration(
 			node: acorn.FunctionDeclaration,
 			_state,
@@ -4215,14 +4221,26 @@ function hoistDeclarations(node: Node) {
 			);
 			ancestors = ancestors.slice(0, -1);
 
-			hoist(node.id.name, ancestors, {
-				toTopOf: "block",
-				functionDecl: node,
-				defineOptions: {
-					allowRedecl: true,
-					allowAsGlobalObjectProperty: true,
-				},
-			});
+			if (node.id) {
+				hoist(node.id.name, ancestors, {
+					toTopOf: "block",
+					functionDecl: node,
+					defineOptions: {
+						allowRedecl: true,
+						allowAsGlobalObjectProperty: true,
+					},
+				});
+			}
+		},
+
+		FunctionExpression(node, state, ancestors) {
+			if (!node.id) return;
+
+			assert(
+				node.id.type === "Identifier",
+				"FunctionExpression: id not an Identifier?",
+			);
+			return this.FunctionDeclaration!(node, state, ancestors);
 		},
 
 		VariableDeclaration(
@@ -4270,7 +4288,9 @@ function hoistDeclarations(node: Node) {
 				}
 			}
 		},
-	});
+	};
+
+	acornWalk.ancestor(node, visitor);
 
 	interface HoistOptions {
 		toTopOf: "function" | "block";
@@ -4291,7 +4311,11 @@ function hoistDeclarations(node: Node) {
 
 		switch (options.toTopOf) {
 			case "block": {
-				dest = ancestors[ancestors.length - 1];
+				dest =
+					ancestors.findLast((anc) =>
+						NODE_TYPES_WITH_BINDINGS.includes(anc.type)
+					) ?? ancestors[0];
+				assert(dest !== undefined, "root node not a Program");
 				break;
 			}
 
@@ -4312,6 +4336,11 @@ function hoistDeclarations(node: Node) {
 			default:
 				throw new AssertionError();
 		}
+
+		assert(
+			NODE_TYPES_WITH_BINDINGS.includes(dest.type),
+			`hoist bug: destination node can't be ${dest.type}`,
+		);
 
 		dest.bindings ??= new Map();
 		dest.functionDecls ??= [];

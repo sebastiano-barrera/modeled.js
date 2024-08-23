@@ -992,48 +992,32 @@ export class VM {
 		}
 		textOfSource.set(path, text);
 
-		const ast = acorn.parse(text, {
-			ecmaVersion: "latest",
-			sourceFile: path,
-			locations: true,
-		});
-
 		try {
 			assert(_CV === undefined, "nested VM execution!");
 			_CV = this;
-			return this.runProgram(ast);
-		} finally {
-			_CV = undefined;
-		}
-	}
 
-	runProgram(node: acorn.Program) {
-		assert(node.sourceType === "script", "only script is supported");
-		assert(this.currentScope === null, "nested program!");
+			const ast = acorn.parse(text, {
+				ecmaVersion: "latest",
+				sourceFile: path,
+				locations: true,
+			});
 
-		//
-		hoistDeclarations(node);
-
-		try {
-			// pass the full Program node to runStmt to make sure that hoisted declarations
-			// are processed
-			this.runStmt(node);
+			this.runProgram(ast);
 			return { outcome: "success" };
 		} catch (error) {
-			if (error.isContinueFor !== undefined) {
-				throw new AssertionError(
-					"vm bug: control-flow (continue) utility exception leaked!",
+			// acorn throws a builtin SyntaxError; we convert it into a guest SyntaxError
+			if (error instanceof SyntaxError) {
+				error = this.makeError(
+					"SyntaxError",
+					error.message,
 				);
 			}
-			if (error.isBreakFor !== undefined) {
-				throw new AssertionError(
-					"vm bug: control-flow (break) utility exception leaked!",
-				);
-			}
-			// assert(
-			// 	error.continue === undefined && error.break === undefined,
-			// 	"vm bug: control-flow utility exception leaked!",
-			// );
+
+			assert(
+				error.continue === undefined && error.break === undefined,
+				"vm bug: control-flow utility exception leaked!",
+			);
+
 			if (error instanceof ProgramException) {
 				const excval = error.exceptionValue;
 				const message = excval.type === "object"
@@ -1055,6 +1039,35 @@ export class VM {
 					error,
 					programExceptionName,
 				};
+			}
+
+			throw error;
+		} finally {
+			_CV = undefined;
+		}
+	}
+
+	runProgram(node: acorn.Program): void {
+		assert(node.sourceType === "script", "only script is supported");
+		assert(this.currentScope === null, "nested program!");
+
+		//
+		hoistDeclarations(node);
+
+		try {
+			// pass the full Program node to runStmt to make sure that hoisted declarations
+			// are processed
+			this.runStmt(node);
+		} catch (error) {
+			if (error.isContinueFor !== undefined) {
+				throw new AssertionError(
+					"vm bug: control-flow (continue) utility exception leaked!",
+				);
+			}
+			if (error.isBreakFor !== undefined) {
+				throw new AssertionError(
+					"vm bug: control-flow (break) utility exception leaked!",
+				);
 			}
 			throw error;
 		}
@@ -2674,7 +2687,11 @@ export class VM {
 	throwTypeError(message: string): never {
 		return this.throwError("TypeError", message);
 	}
-	throwError(constructorName: string, message: string, cause?: Error): never {
+	makeError(
+		constructorName: string,
+		message: string,
+		cause?: Error,
+	): ProgramException {
 		const excCons = this.globalObj.getProperty(constructorName, this);
 		if (!(excCons instanceof VMInvokable)) {
 			throw new AssertionError("exception constructor must be invokable");
@@ -2686,7 +2703,10 @@ export class VM {
 		const messageValue: JSValue = { type: "string", value: message };
 		const exc = this.performNew(excCons, [messageValue]);
 
-		throw new ProgramException(exc, this.synCtx, cause);
+		return new ProgramException(exc, this.synCtx, cause);
+	}
+	throwError(constructorName: string, message: string, cause?: Error): never {
+		throw this.makeError(constructorName, message, cause);
 	}
 
 	coerceToObject(value: JSValue): VMObject {

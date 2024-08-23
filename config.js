@@ -3,11 +3,7 @@ import testMeta from './testMeta.json' with {type: 'json'};
 
 const fraction = 1.0
 const predicate = path => (
-  (
-    path.includes('/assignmenttargettype/')
-    || path.includes('/redeclaration/')
-  )
-  // && (testMeta.testCases[path]?.features ?? []).length === 0
+  (testMeta.testCases[path]?.features ?? []).length === 0
   && Math.random() < fraction
 );
 

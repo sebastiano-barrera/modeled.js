@@ -35,23 +35,19 @@ if (args.single) {
   const outcomes = await runTest262Case(test262Root, args.single);
   for (const outcome of outcomes) {
     console.log(`outcome\t${outcome.mode}\t${outcome.outcome}`);
-    if (outcome.outcome === "failure") {
-      console.log(`\terror\t${outcome.error}`);
 
-      const context = outcome.error.context;
-      if (context) {
-        for (const item of context) {
-          console.log(
-            `\tectx\t${item.loc.source}:${item.loc.start.line}-${item.loc.end.line}:${item.loc.start.column}-${item.loc.end.column} ${item.type}`,
-          );
-        }
-      }
+    outcome.ectx = outcome.error?.context.map((item) => {
+      const l = item.loc;
+      return `${l.source}:${l.start.line}-${l.end.line}:${l.start.column}-${l.end.column} ${item.type}`;
+    });
+    outcome.stack = outcome.error?.stack?.split("\n");
 
-      const stack = outcome.error.stack;
-      if (stack) {
-        for (const line of stack.split("\n")) {
-          console.log(`\tstack\t${line}`);
-        }
+    for (const key of Object.keys(outcome).sort()) {
+      if (key === "outcome") continue;
+      const value = outcome[key];
+      const lines = Array.isArray(value) ? value : [value];
+      for (const line of lines) {
+        console.log(`\t${key}\t${line}`);
       }
     }
   }

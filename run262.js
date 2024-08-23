@@ -59,7 +59,7 @@ if (args.single) {
   const skips = [];
   const failures = [];
 
-  for (let relPath of testConfig.testCases) {
+  for (const relPath of testConfig.testCases) {
     const path = relPath.startsWith("/")
       ? relPath
       : (test262Root + "/" + relPath);

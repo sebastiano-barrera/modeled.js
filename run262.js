@@ -39,10 +39,10 @@ if (args.single) {
     if (outcome.outcome === 'success') continue;
 
     outcome.ctor = outcome.error?.constructor.name;
-    outcome.ectx = outcome.error?.context.map((item) => {
+    outcome.ectx = outcome.error?.context?.map((item) => {
       const l = item.loc;
       return `${l.source}:${l.start.line}-${l.end.line}:${l.start.column}-${l.end.column} ${item.type}`;
-    });
+    }) ?? [];
     outcome.stack = outcome.error?.stack?.split("\n");
 
     for (const key of Object.keys(outcome).sort()) {

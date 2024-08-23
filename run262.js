@@ -157,20 +157,33 @@ async function runTest262Case(test262Root, path) {
     } catch (err) {
       if (err instanceof Modeled.ArbitrarilyLeftUnimplemented) {
         throw new SkippedTest(err.message);
-      } 
+      }
+      outcome = {
+        outcome: "failure",
+        errorCategory: "vm error",
+        error: err,
+      };
+    }
 
-       if (metadata.negative && err.name === metadata.negative.type) {
-        outcome = {
-          outcome: "success",
-          expectedError: metadata.negative.type,
-          error: err,
-        };
-      } else {
+    if (metadata.negative) {
+      if (outcome.outcome === "success") {
         outcome = {
           outcome: "failure",
-          errorCategory: "vm error",
-          error: err,
+          errorCategory: "unexpected success",
+          expectedError: metadata.negative.type,
+          error: new Error(
+            `expected error ${metadata.negative.type}, but script completed successfully`,
+          ),
         };
+      } else if (outcome.error.name !== metadata.negative.type) {
+        outcome = {
+          outcome: "failure",
+          errorCategory: "wrong exception type",
+          expectedError: metadata.negative.type,
+          error: outcome.error,
+        };
+      } else {
+        outcome = { outcome: "success" };
       }
     }
 

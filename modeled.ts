@@ -1672,6 +1672,11 @@ export class VM {
 		assert(this.currentScope !== null, "there must be a scope");
 
 		switch (expr.type) {
+			case "ClassExpression":
+				throw new ArbitrarilyLeftUnimplemented(
+					`${expr.type} is not supported in this JavaScript interpreter`,
+				);
+
 			case "AssignmentExpression": {
 				let value = this.evalExpr(expr.right);
 

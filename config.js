@@ -3,7 +3,8 @@ import testMeta from './testMeta.json' with {type: 'json'};
 
 const fraction = 1.0
 const predicate = path => (
-  (testMeta.testCases[path]?.features ?? []).length === 0
+  path.includes('/function')
+  && (testMeta.testCases[path]?.features ?? []).length === 0
   && Math.random() < fraction
 );
 

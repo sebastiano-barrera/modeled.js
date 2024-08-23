@@ -89,6 +89,7 @@ interface Node extends acorn.Node {
 // If there is a VM "in" the call stack, it will transform the ExceptionRequest
 // into a proper JS exception.
 class ExceptionRequest extends Error {
+	name = "ExceptionRequest";
 	constructor(
 		public constructorName: string,
 		public message: string,
@@ -1038,10 +1039,21 @@ export class VM {
 				const message = excval.type === "object"
 					? excval.getProperty("message")
 					: excval;
+
+				let programExceptionName: string | undefined = undefined;
+				if (error.exceptionValue instanceof VMObject) {
+					const name = error.exceptionValue.getProperty?.("name");
+					if (name?.type === "string") {
+						programExceptionName = name.value;
+					}
+				}
+
 				return {
 					outcome: "failure",
+					errorCategory: "vm exception",
 					message,
 					error,
+					programExceptionName,
 				};
 			}
 			throw error;
@@ -1061,10 +1073,12 @@ export class VM {
 	}
 
 	directEval(text: string) {
-		assert (this.currentScope !== null, "");
+		assert(this.currentScope !== null, "");
 
 		if (!this.currentScope.isStrict()) {
-			throw new ArbitrarilyLeftUnimplemented("eval is only supported in strict mode");
+			throw new ArbitrarilyLeftUnimplemented(
+				"eval is only supported in strict mode",
+			);
 		}
 
 		let ast: acorn.Program & Node;
@@ -1077,7 +1091,7 @@ export class VM {
 		} catch (err) {
 			if (err instanceof SyntaxError) {
 				// translate this into a SyntaxError into the running program
-				this.throwError("SyntaxError", err.message);
+				return this.throwError("SyntaxError", err.message);
 			}
 			throw err;
 		}

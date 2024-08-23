@@ -36,6 +36,9 @@ if (args.single) {
   for (const outcome of outcomes) {
     console.log(`outcome\t${outcome.mode}\t${outcome.outcome}`);
 
+    if (outcome.outcome === 'success') continue;
+
+    outcome.ctor = outcome.error?.constructor.name;
     outcome.ectx = outcome.error?.context.map((item) => {
       const l = item.loc;
       return `${l.source}:${l.start.line}-${l.end.line}:${l.start.column}-${l.end.column} ${item.type}`;
@@ -175,15 +178,11 @@ async function runTest262Case(test262Root, path) {
             `expected error ${metadata.negative.type}, but script completed successfully`,
           ),
         };
-      } else if (outcome.error.name !== metadata.negative.type) {
-        outcome = {
-          outcome: "failure",
-          errorCategory: "wrong exception type",
-          expectedError: metadata.negative.type,
-          error: outcome.error,
-        };
+      } else if (outcome.programExceptionName !== metadata.negative.type) {
+        outcome.errorCategory = "wrong exception type";
+        outcome.expectedError = metadata.negative.type;
       } else {
-        outcome = { outcome: "success" };
+        outcome.outcome = "success";
       }
     }
 

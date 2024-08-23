@@ -4148,7 +4148,8 @@ function expressionToPattern(argument: acorn.Expression): acorn.Pattern {
 }
 
 const RESERVED_WORDS = new Set([
-	"await",
+	// Only reserved within an async function, which we currently do not implement
+	// "await", 
 	"break",
 	"case",
 	"catch",

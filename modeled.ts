@@ -4127,9 +4127,54 @@ function expressionToPattern(argument: acorn.Expression): acorn.Pattern {
 	);
 }
 
-// Scan the given node and its children recursively. Hoist all declarations:
-// as a consequence, every declaration is added to the `bindings` list of
-// the outermost node where the declaration is bound.
+const RESERVED_WORDS = new Set([
+	"await",
+	"break",
+	"case",
+	"catch",
+	"class",
+	"const",
+	"continue",
+	"debugger",
+	"default",
+	"delete",
+	"do",
+	"else",
+	"enum",
+	"export",
+	"extends",
+	"false",
+	"finally",
+	"for",
+	"function",
+	"if",
+	"import",
+	"in",
+	"instanceof",
+	"new",
+	"null",
+	"public", // not in ECMAScript's "ReservedWord"
+	"private", // not in ECMAScript's "ReservedWord"
+	"return",
+	"super",
+	"switch",
+	"this",
+	"throw",
+	"true",
+	"try",
+	"typeof",
+	"var",
+	"void",
+	"while",
+	"with",
+	"yield",
+]);
+
+/**
+ * Scan the given node and its children recursively. Hoist all declarations:
+ * as a consequence, every declaration is added to the `bindings` list of
+ * the outermost node where the declaration is bound.
+ */
 function hoistDeclarations(node: Node) {
 	acornWalk.ancestor(node, {
 		FunctionDeclaration(
@@ -4209,6 +4254,13 @@ function hoistDeclarations(node: Node) {
 	/** NOTE `ancestors` MUST not include the declaration node itself */
 	function hoist(name: string, ancestors: Node[], options: HoistOptions) {
 		let dest: Node;
+
+		if (RESERVED_WORDS.has(name)) {
+			throw new ExceptionRequest(
+				"SyntaxError",
+				"reserved word can't be used as identifier in declaration: " + name,
+			);
+		}
 
 		switch (options.toTopOf) {
 			case "block": {

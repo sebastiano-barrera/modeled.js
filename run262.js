@@ -2,6 +2,7 @@ import * as Modeled from "./modeled.ts";
 
 import { parseArgs as parseArgsGeneric } from "https://deno.land/std@0.224.0/cli/parse_args.ts";
 import * as YAML from "@std/yaml";
+import { AssertionError } from "https://deno.land/std@0.224.0/assert/assertion_error.ts";
 
 class CliError extends Error {}
 
@@ -32,6 +33,7 @@ function checkFlagString(flag, description) {
 {
   checkFlagRequired("test262", "path to the test262 repo");
   checkFlagString("filter", "substring of the path that enables a test");
+  checkFlagString('worker', '(internal) worker configuration index/count');
   if ('single' in args)
     checkFlagString("single", "path to the single test case (relative or absolute)");
   else
@@ -45,6 +47,21 @@ const preamble = {
 };
 
 if (args.single) {
+  await cmdSingle();
+} else if (args.worker) {
+  const toks = args.worker.split("/");
+  if (toks.length !== 2) {
+    throw new CliError("invalid worker spec: " + args.worker);
+  }
+
+  const workerIndex = Number(toks[0]);
+  const workerCount = Number(toks[1]);
+  await cmdWorker(workerIndex, workerCount);
+} else {
+  cmdManager();
+}
+
+async function cmdSingle() {
   console.log(" --- single test case " + args.single);
   const outcomes = await runTest262Case(test262Root, args.single);
   for (const outcome of outcomes) {
@@ -67,7 +84,50 @@ if (args.single) {
       }
     }
   }
-} else {
+}
+
+async function cmdManager() {
+  const WORKER_COUNT = 8;
+
+  const children = [];
+  for (let i = 0; i < WORKER_COUNT; i++) {
+    const childArgs = [
+      "run",
+      "--allow-read",
+      import.meta.filename,
+      "--worker",
+      `${i}/${WORKER_COUNT}`,
+    ].concat(Deno.args);
+
+    const cmd = new Deno.Command(Deno.execPath(), {
+      args: childArgs,
+      stdout: "piped",
+      stderr: "piped",
+    });
+    children.push(cmd.spawn());
+  }
+
+  if (children.length !== WORKER_COUNT) throw new AssertionError();
+
+  let allOk = true;
+  for (let i = 0; i < WORKER_COUNT; i++) {
+    console.log(`waiting child ${i}...`);
+    const output = await children[i].output();
+    console.log(`child ${i} finished with status ${output.status}`);
+
+    const stdout = new TextDecoder().decode(output.stdout);
+    for (const line of stdout.split("\n")) {
+      console.log('worker ' + String(i).padStart(4) + '| ' + line);
+    }
+
+    allOk = allOk && output.success;
+  }
+
+  Deno.exit(allOk ? 0 : 1);
+}
+
+async function cmdWorker(workerIndex, workerCount) {
+  console.log(`worker ${workerIndex} of ${workerCount}`);
   const testConfigRaw = await Deno.readTextFile(args.config);
   const testConfig = JSON.parse(testConfigRaw);
 
@@ -75,7 +135,12 @@ if (args.single) {
   const skips = [];
   const failures = [];
 
-  for (const relPath of testConfig.testCases) {
+  for (let i = 0; i < testConfig.testCases.length; i++) {
+    if (i % workerCount !== workerIndex) {
+      continue;
+    }
+    const relPath = testConfig.testCases[i];
+
     const path = relPath.startsWith("/")
       ? relPath
       : (test262Root + "/" + relPath);

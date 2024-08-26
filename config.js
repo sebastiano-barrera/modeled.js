@@ -16,10 +16,10 @@ for (const tc of fullTestConfig.testCases) {
 }
 
 const output = { testCases: filteredTestCases }
-Deno.writeTextFile('./testConfig.json', JSON.stringify(output))
+console.log(JSON.stringify(output))
 
 const nSel = filteredTestCases.length
 const nTotal = fullTestConfig.testCases.length
-console.log(`selected ${nSel} out of ${nTotal} test cases`)
+console.error(`selected ${nSel} out of ${nTotal} test cases`)
 
 

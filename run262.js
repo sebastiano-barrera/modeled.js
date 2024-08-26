@@ -11,18 +11,32 @@ class SkippedTest {
   }
 }
 
-let args;
-try {
-  args = parseArgsChecked(Deno.args);
-} catch (err) {
-  console.error("while parsing command-line: " + err);
-  Deno.exit(1);
+const args = parseArgsGeneric(Deno.args);
+
+function checkFlagRequired(flag, description) {
+  if (typeof args[flag] !== "string") {
+    throw new CliError(
+      `required argument missing or invalid: --${flag} (${description})`,
+    );
+  }
+}
+function checkFlagString(flag, description) {
+  if (args[flag] !== undefined && typeof (args[flag]) !== "string") {
+    throw new CliError(
+      `argument for --${flag} must be string (${description})`,
+    );
+  }
 }
 
-const testConfigRaw = await Deno.readTextFile(
-  args.config || "./testConfig.json",
-);
-const testConfig = JSON.parse(testConfigRaw);
+// deno-fmt-ignore
+{
+  checkFlagRequired("test262", "path to the test262 repo");
+  checkFlagString("filter", "substring of the path that enables a test");
+  if ('single' in args)
+    checkFlagString("single", "path to the single test case (relative or absolute)");
+  else
+    checkFlagRequired("config",  "path to the test config JSON (e.g. test/focused.json)");
+}
 
 const test262Root = args.test262;
 const preamble = {
@@ -36,8 +50,7 @@ if (args.single) {
   for (const outcome of outcomes) {
     console.log(`outcome\t${outcome.mode}\t${outcome.outcome}`);
 
-    if (outcome.outcome === 'success') continue;
-
+    if (outcome.outcome === "success") continue;
     outcome.ctor = outcome.error?.constructor.name;
     outcome.ectx = outcome.error?.context?.map((item) => {
       const l = item.loc;
@@ -55,6 +68,9 @@ if (args.single) {
     }
   }
 } else {
+  const testConfigRaw = await Deno.readTextFile(args.config);
+  const testConfig = JSON.parse(testConfigRaw);
+
   const successes = [];
   const skips = [];
   const failures = [];

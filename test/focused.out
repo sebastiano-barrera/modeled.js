@@ -531,7 +531,7 @@
  ... running /home/sebastiano/src/test262/test/language/statements/switch/syntax/redeclaration/function-name-redeclaration-attempt-with-function.js
  ... running /home/sebastiano/src/test262/test/language/statements/switch/syntax/redeclaration/function-name-redeclaration-attempt-with-let.js
  ... running /home/sebastiano/src/test262/test/language/statements/switch/syntax/redeclaration/function-name-redeclaration-attempt-with-var.js
-566 successes:
+573 successes:
  - /home/sebastiano/src/test262/test/language/block-scope/syntax/function-declarations/in-statement-position-case-expression-statement-list.js
  - /home/sebastiano/src/test262/test/language/block-scope/syntax/function-declarations/in-statement-position-case-expression-statement-list.js
  - /home/sebastiano/src/test262/test/language/block-scope/syntax/function-declarations/in-statement-position-default-statement-list.js
@@ -572,6 +572,7 @@
  - /home/sebastiano/src/test262/test/language/expressions/function/name-arguments-strict.js
  - /home/sebastiano/src/test262/test/language/expressions/function/name-eval-strict-body.js
  - /home/sebastiano/src/test262/test/language/expressions/function/name-eval-strict.js
+ - /home/sebastiano/src/test262/test/language/expressions/function/named-strict-error-reassign-fn-name-in-body-in-arrow.js
  - /home/sebastiano/src/test262/test/language/expressions/function/param-arguments-non-strict.js
  - /home/sebastiano/src/test262/test/language/expressions/function/param-duplicated-non-strict.js
  - /home/sebastiano/src/test262/test/language/expressions/function/param-duplicated-strict-1.js
@@ -879,21 +880,29 @@
  - /home/sebastiano/src/test262/test/language/statements/function/13.2-11-s.js
  - /home/sebastiano/src/test262/test/language/statements/function/13.2-12-s.js
  - /home/sebastiano/src/test262/test/language/statements/function/13.2-12-s.js
+ - /home/sebastiano/src/test262/test/language/statements/function/13.2-13-s.js
+ - /home/sebastiano/src/test262/test/language/statements/function/13.2-13-s.js
  - /home/sebastiano/src/test262/test/language/statements/function/13.2-15-s.js
  - /home/sebastiano/src/test262/test/language/statements/function/13.2-15-s.js
  - /home/sebastiano/src/test262/test/language/statements/function/13.2-16-s.js
  - /home/sebastiano/src/test262/test/language/statements/function/13.2-16-s.js
+ - /home/sebastiano/src/test262/test/language/statements/function/13.2-17-s.js
+ - /home/sebastiano/src/test262/test/language/statements/function/13.2-17-s.js
  - /home/sebastiano/src/test262/test/language/statements/function/13.2-19-s.js
  - /home/sebastiano/src/test262/test/language/statements/function/13.2-19-s.js
  - /home/sebastiano/src/test262/test/language/statements/function/13.2-20-s.js
+ - /home/sebastiano/src/test262/test/language/statements/function/13.2-21-s.js
  - /home/sebastiano/src/test262/test/language/statements/function/13.2-23-s.js
  - /home/sebastiano/src/test262/test/language/statements/function/13.2-24-s.js
+ - /home/sebastiano/src/test262/test/language/statements/function/13.2-25-s.js
  - /home/sebastiano/src/test262/test/language/statements/function/13.2-27-s.js
  - /home/sebastiano/src/test262/test/language/statements/function/13.2-28-s.js
  - /home/sebastiano/src/test262/test/language/statements/function/13.2-3-s.js
  - /home/sebastiano/src/test262/test/language/statements/function/13.2-3-s.js
+ - /home/sebastiano/src/test262/test/language/statements/function/13.2-5-s.js
  - /home/sebastiano/src/test262/test/language/statements/function/13.2-7-s.js
  - /home/sebastiano/src/test262/test/language/statements/function/13.2-8-s.js
+ - /home/sebastiano/src/test262/test/language/statements/function/13.2-9-s.js
  - /home/sebastiano/src/test262/test/language/statements/function/S10.1.1_A1_T1.js
  - /home/sebastiano/src/test262/test/language/statements/function/S10.1.1_A1_T1.js
  - /home/sebastiano/src/test262/test/language/statements/function/S13.2.1_A1_T1.js
@@ -985,8 +994,6 @@
  - /home/sebastiano/src/test262/test/language/statements/function/S13.2_A6_T2.js
  - /home/sebastiano/src/test262/test/language/statements/function/S13.2_A7_T1.js
  - /home/sebastiano/src/test262/test/language/statements/function/S13.2_A7_T2.js
- - /home/sebastiano/src/test262/test/language/statements/function/S13.2_A8_T1.js
- - /home/sebastiano/src/test262/test/language/statements/function/S13.2_A8_T2.js
  - /home/sebastiano/src/test262/test/language/statements/function/S13_A10.js
  - /home/sebastiano/src/test262/test/language/statements/function/S13_A10.js
  - /home/sebastiano/src/test262/test/language/statements/function/S13_A12_T1.js
@@ -1148,7 +1155,7 @@
  - /home/sebastiano/src/test262/test/language/statements/function/scope-param-elem-var-close.js: eval is only supported in strict mode
  - /home/sebastiano/src/test262/test/language/statements/function/scope-param-elem-var-open.js: eval is only supported in strict mode
 
-140 failures:
+133 failures:
 case	/home/sebastiano/src/test262/test/language/expressions/function/arguments-with-arguments-fn.js
 error	Error: interpreted js program exception: variable accessed before initialization
 case	/home/sebastiano/src/test262/test/language/expressions/function/arguments-with-arguments-lex.js
@@ -1173,8 +1180,6 @@ case	/home/sebastiano/src/test262/test/language/expressions/function/named-no-st
 error	Error: interpreted js program exception: Expected SameValue(«1», «Function#574») to be true
 case	/home/sebastiano/src/test262/test/language/expressions/function/named-no-strict-reassign-fn-name-in-body.js
 error	Error: interpreted js program exception: Expected SameValue(«1», «Function#599») to be true
-case	/home/sebastiano/src/test262/test/language/expressions/function/named-strict-error-reassign-fn-name-in-body-in-arrow.js
-error	Error: interpreted js program exception: Expected a TypeError to be thrown but no exception was thrown at all
 case	/home/sebastiano/src/test262/test/language/expressions/function/named-strict-error-reassign-fn-name-in-body-in-eval.js
 error	Error: interpreted js program exception: Expected a TypeError to be thrown but no exception was thrown at all
 case	/home/sebastiano/src/test262/test/language/expressions/function/named-strict-error-reassign-fn-name-in-body.js
@@ -1188,13 +1193,13 @@ error	Error: interpreted js program exception: length is properly set Expected S
 case	/home/sebastiano/src/test262/test/language/expressions/function/params-trailing-comma-single.js
 error	Error: interpreted js program exception: length is properly set Expected SameValue(«», «1») to be true
 case	/home/sebastiano/src/test262/test/language/expressions/function/scope-name-var-close.js
-error	Error: interpreted js program exception: Expected SameValue(«outside», «Function#843») to be true
+error	Error: interpreted js program exception: Expected SameValue(«outside», «Function#842») to be true
 case	/home/sebastiano/src/test262/test/language/expressions/function/scope-name-var-close.js
-error	Error: interpreted js program exception: Expected SameValue(«outside», «Function#856») to be true
+error	Error: interpreted js program exception: Expected SameValue(«outside», «Function#855») to be true
 case	/home/sebastiano/src/test262/test/language/expressions/function/scope-name-var-open-non-strict.js
-error	Error: interpreted js program exception: Expected SameValue(«Function#871», «outside») to be true
+error	Error: interpreted js program exception: Expected SameValue(«Function#870», «outside») to be true
 case	/home/sebastiano/src/test262/test/language/expressions/function/scope-name-var-open-strict.js
-error	Error: interpreted js program exception: Expected SameValue(«Function#889», «outside») to be true
+error	Error: interpreted js program exception: Expected SameValue(«Function#888», «outside») to be true
 case	/home/sebastiano/src/test262/test/language/expressions/function/scope-param-rest-elem-var-close.js
 error	Error: unsupported: func params of type RestElement
 case	/home/sebastiano/src/test262/test/language/expressions/function/scope-param-rest-elem-var-open.js
@@ -1219,10 +1224,6 @@ case	/home/sebastiano/src/test262/test/language/statements/function/13.2-10-s.js
 error	Error: interpreted js program exception: Expected a TypeError to be thrown but no exception was thrown at all
 case	/home/sebastiano/src/test262/test/language/statements/function/13.2-10-s.js
 error	Error: interpreted js program exception: Expected a TypeError to be thrown but no exception was thrown at all
-case	/home/sebastiano/src/test262/test/language/statements/function/13.2-13-s.js
-error	Error: interpreted js program exception: Expected a TypeError to be thrown but no exception was thrown at all
-case	/home/sebastiano/src/test262/test/language/statements/function/13.2-13-s.js
-error	Error: interpreted js program exception: Expected a TypeError to be thrown but no exception was thrown at all
 case	/home/sebastiano/src/test262/test/language/statements/function/13.2-14-s.js
 error	Error: interpreted js program exception: Expected a TypeError to be thrown but no exception was thrown at all
 case	/home/sebastiano/src/test262/test/language/statements/function/13.2-14-s.js
@@ -1235,10 +1236,6 @@ case	/home/sebastiano/src/test262/test/language/statements/function/13.2-17-1.js
 error	Error: interpreted js program exception: Expected SameValue(«number», «function») to be true
 case	/home/sebastiano/src/test262/test/language/statements/function/13.2-17-1.js
 error	Error: interpreted js program exception: Expected SameValue(«number», «function») to be true
-case	/home/sebastiano/src/test262/test/language/statements/function/13.2-17-s.js
-error	Error: interpreted js program exception: Expected a TypeError to be thrown but no exception was thrown at all
-case	/home/sebastiano/src/test262/test/language/statements/function/13.2-17-s.js
-error	Error: interpreted js program exception: Expected a TypeError to be thrown but no exception was thrown at all
 case	/home/sebastiano/src/test262/test/language/statements/function/13.2-18-1.js
 error	Error: interpreted js program exception: descriptor should not be enumerable; descriptor should not be configurable
 case	/home/sebastiano/src/test262/test/language/statements/function/13.2-18-1.js
@@ -1251,11 +1248,7 @@ case	/home/sebastiano/src/test262/test/language/statements/function/13.2-19-b-3g
 error	Error: interpreted js program exception: Expected a TypeError to be thrown but no exception was thrown at all
 case	/home/sebastiano/src/test262/test/language/statements/function/13.2-2-s.js
 error	Error: interpreted js program exception: Expected a TypeError to be thrown but no exception was thrown at all
-case	/home/sebastiano/src/test262/test/language/statements/function/13.2-21-s.js
-error	Error: interpreted js program exception: Expected a TypeError to be thrown but no exception was thrown at all
 case	/home/sebastiano/src/test262/test/language/statements/function/13.2-22-s.js
-error	Error: interpreted js program exception: Expected a TypeError to be thrown but no exception was thrown at all
-case	/home/sebastiano/src/test262/test/language/statements/function/13.2-25-s.js
 error	Error: interpreted js program exception: Expected a TypeError to be thrown but no exception was thrown at all
 case	/home/sebastiano/src/test262/test/language/statements/function/13.2-26-s.js
 error	Error: interpreted js program exception: Expected a TypeError to be thrown but no exception was thrown at all
@@ -1265,12 +1258,8 @@ case	/home/sebastiano/src/test262/test/language/statements/function/13.2-30-s.js
 error	Error: interpreted js program exception: Expected a TypeError to be thrown but no exception was thrown at all
 case	/home/sebastiano/src/test262/test/language/statements/function/13.2-4-s.js
 error	Error: interpreted js program exception: Expected a TypeError to be thrown but no exception was thrown at all
-case	/home/sebastiano/src/test262/test/language/statements/function/13.2-5-s.js
-error	Error: interpreted js program exception: Expected a TypeError to be thrown but no exception was thrown at all
 case	/home/sebastiano/src/test262/test/language/statements/function/13.2-6-s.js
 error	Error: interpreted js program exception: Expected a TypeError to be thrown but no exception was thrown at all
-case	/home/sebastiano/src/test262/test/language/statements/function/13.2-9-s.js
-error	Error: interpreted js program exception: Expected a TypeError to be thrown but no exception was thrown at all
 case	/home/sebastiano/src/test262/test/language/statements/function/S13.2.1_A5_T1.js
 error	Error: interpreted js program exception: callee must be callable, not undefined
 case	/home/sebastiano/src/test262/test/language/statements/function/S13.2.1_A5_T1.js
@@ -1323,6 +1312,10 @@ case	/home/sebastiano/src/test262/test/language/statements/function/S13.2_A4_T2.
 error	Error: interpreted js program exception: #2: __gunc.prototype.constructor === __gunc. Actual: __gunc.prototype.constructor ===undefined
 case	/home/sebastiano/src/test262/test/language/statements/function/S13.2_A4_T2.js
 error	Error: interpreted js program exception: #2: __gunc.prototype.constructor === __gunc. Actual: __gunc.prototype.constructor ===undefined
+case	/home/sebastiano/src/test262/test/language/statements/function/S13.2_A8_T1.js
+error	Error: assertion failed: looking up described value but vm not passed
+case	/home/sebastiano/src/test262/test/language/statements/function/S13.2_A8_T2.js
+error	Error: assertion failed: looking up described value but vm not passed
 case	/home/sebastiano/src/test262/test/language/statements/function/S13_A1.js
 error	Error: interpreted js program exception: #2: typeof __exp__func === "undefined". Actual: typeof __exp__func ===function
 case	/home/sebastiano/src/test262/test/language/statements/function/S13_A1.js
@@ -1429,4 +1422,4 @@ case	/home/sebastiano/src/test262/test/language/statements/let/function-local-cl
 error	Error: interpreted js program exception: Expected a ReferenceError to be thrown but no exception was thrown at all
 case	/home/sebastiano/src/test262/test/language/statements/let/function-local-closure-set-before-initialization.js
 error	Error: interpreted js program exception: Expected a ReferenceError to be thrown but no exception was thrown at all
-summary: 566 successes; 48 skipped; 140 failures
+summary: 573 successes; 48 skipped; 133 failures

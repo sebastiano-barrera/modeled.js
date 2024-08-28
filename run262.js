@@ -2,7 +2,10 @@ import * as Modeled from "./modeled.ts";
 
 import { parseArgs as parseArgsGeneric } from "https://deno.land/std@0.224.0/cli/parse_args.ts";
 import * as YAML from "@std/yaml";
+import { TextLineStream } from "https://deno.land/std@0.224.0/streams/mod.ts";
 import { AssertionError } from "https://deno.land/std@0.224.0/assert/assertion_error.ts";
+
+const WORKER_OUTPUT_PREFIX = "worker output:";
 
 class CliError extends Error {}
 
@@ -87,7 +90,9 @@ async function cmdSingle() {
 }
 
 async function cmdManager() {
-  const WORKER_COUNT = 8;
+  const WORKER_COUNT = 4;
+
+  const outputRaw = [];
 
   const children = [];
   for (let i = 0; i < WORKER_COUNT; i++) {
@@ -104,7 +109,33 @@ async function cmdManager() {
       stdout: "piped",
       stderr: "piped",
     });
-    children.push(cmd.spawn());
+    const child = cmd.spawn();
+    children.push(child);
+
+    const out = child.stdout
+      .pipeThrough(new TextDecoderStream())
+      .pipeThrough(new TextLineStream());
+    const stderrLines = child.stderr
+      .pipeThrough(new TextDecoderStream())
+      .pipeThrough(new TextLineStream());
+    const tag = String(i).padEnd(4);
+
+    (async function () {
+      for await (const line of stderrLines) {
+        console.log(`worker ${tag} ! ${line}`);
+      }
+    })();
+
+    (async function () {
+      for await (const line of out) {
+        if (line.startsWith(WORKER_OUTPUT_PREFIX)) {
+          const jsonEncoded = line.slice(WORKER_OUTPUT_PREFIX.length);
+          outputRaw.push(jsonEncoded);
+        } else {
+          console.log(`worker ${tag} | ${line}`);
+        }
+      }
+    })();
   }
 
   if (children.length !== WORKER_COUNT) throw new AssertionError();
@@ -112,58 +143,22 @@ async function cmdManager() {
   let allOk = true;
   for (let i = 0; i < WORKER_COUNT; i++) {
     console.log(`waiting child ${i}...`);
-    const output = await children[i].output();
-    console.log(`child ${i} finished with status ${output.status}`);
-
-    const stdout = new TextDecoder().decode(output.stdout);
-    for (const line of stdout.split("\n")) {
-      console.log('worker ' + String(i).padStart(4) + '| ' + line);
-    }
-
-    allOk = allOk && output.success;
+    const status = await children[i].status;
+    console.log(`child ${i} finished with status ${status.code}`);
+    allOk = allOk && status.success;
   }
 
-  Deno.exit(allOk ? 0 : 1);
-}
+  if (!allOk) Deno.exit(1);
 
-async function cmdWorker(workerIndex, workerCount) {
-  console.log(`worker ${workerIndex} of ${workerCount}`);
-  const testConfigRaw = await Deno.readTextFile(args.config);
-  const testConfig = JSON.parse(testConfigRaw);
+  const output = outputRaw.map(JSON.parse);
 
   const successes = [];
   const skips = [];
   const failures = [];
-
-  for (let i = 0; i < testConfig.testCases.length; i++) {
-    if (i % workerCount !== workerIndex) {
-      continue;
-    }
-    const relPath = testConfig.testCases[i];
-
-    const path = relPath.startsWith("/")
-      ? relPath
-      : (test262Root + "/" + relPath);
-    try {
-      if (args.filter && !path.includes(args.filter)) {
-        throw new SkippedTest("skipped via --filter option");
-      }
-
-      const outcomes = await runTest262Case(test262Root, path);
-
-      for (const oc of outcomes) {
-        oc.testcase = path;
-        if (oc.outcome === "success") {
-          successes.push(oc);
-        } else {
-          failures.push(oc);
-        }
-      }
-    } catch (e) {
-      if (e instanceof SkippedTest) {
-        skips.push({ path, message: e.message });
-      } else throw e;
-    }
+  for (const oc of output) {
+    if (oc.outcome === "success") successes.push(oc);
+    else if (oc.outcome === "skipped") skips.push(oc);
+    else failures.push(oc);
   }
 
   console.log(`${successes.length} successes:`);
@@ -172,8 +167,8 @@ async function cmdWorker(workerIndex, workerCount) {
   }
 
   console.log(`${skips.length} skipped:`);
-  for (const { path, message } of skips) {
-    console.log(`%c - ${path}: ${message}`, "color: yellow");
+  for (const { testcase, error } of skips) {
+    console.log(`%c - ${testcase}: ${error.message}`, "color: yellow");
   }
 
   if (failures.length === 0) {
@@ -198,6 +193,47 @@ async function cmdWorker(workerIndex, workerCount) {
     "color: yellow",
     "color: red",
   );
+}
+
+async function cmdWorker(workerIndex, workerCount) {
+  console.log(`worker ${workerIndex} of ${workerCount}`);
+  const testConfigRaw = await Deno.readTextFile(args.config);
+  const testConfig = JSON.parse(testConfigRaw);
+
+  function emit(obj) {
+    console.log(WORKER_OUTPUT_PREFIX, JSON.stringify(obj));
+  }
+
+  for (let i = 0; i < testConfig.testCases.length; i++) {
+    if (i % workerCount !== workerIndex) {
+      continue;
+    }
+    
+    const relPath = testConfig.testCases[i];
+    const path = relPath.startsWith("/")
+      ? relPath
+      : (test262Root + "/" + relPath);
+
+    try {
+      if (args.filter && !path.includes(args.filter)) {
+        throw new SkippedTest("skipped via --filter option");
+      }
+
+      const outcomes = await runTest262Case(test262Root, path);
+      for (const oc of outcomes) {
+        oc.testcase = path;
+        emit(oc);
+      }
+    } catch (e) {
+      if (e instanceof SkippedTest) {
+        emit({
+          outcome: "skipped",
+          testcase: path,
+          error: e.message,
+        });
+      } else throw e;
+    }
+  }
 }
 
 async function runTest262Case(test262Root, path) {
@@ -238,6 +274,9 @@ async function runTest262Case(test262Root, path) {
     let outcome;
     try {
       outcome = vm.runScript({ path, text: effectiveText });
+      // modeled.VM returns an Error, but we want outcome.error to always be a string
+      // this makes the outcome JSON-encodable (to be returned to the manager) without loss
+      outcome.error = outcome.error.toString();
     } catch (err) {
       if (err instanceof Modeled.ArbitrarilyLeftUnimplemented) {
         throw new SkippedTest(err.message);
@@ -245,7 +284,7 @@ async function runTest262Case(test262Root, path) {
       outcome = {
         outcome: "failure",
         errorCategory: "vm error",
-        error: err,
+        error: err.toString(),
       };
     }
 
@@ -255,9 +294,8 @@ async function runTest262Case(test262Root, path) {
           outcome: "failure",
           errorCategory: "unexpected success",
           expectedError: metadata.negative.type,
-          error: new Error(
+          error:
             `expected error ${metadata.negative.type}, but script completed successfully`,
-          ),
         };
       } else if (outcome.programExceptionName !== metadata.negative.type) {
         outcome.errorCategory = "wrong exception type";
@@ -276,24 +314,6 @@ async function runTest262Case(test262Root, path) {
   if (runSloppy) outcomes.push(runInMode(false));
 
   return outcomes;
-}
-
-function parseArgsChecked(args) {
-  args = parseArgsGeneric(args);
-
-  if (typeof args.test262 !== "string") {
-    throw new CliError(
-      "required argument missing or invalid: --test262 DIR, where DIR is the root of the test262 repo",
-    );
-  }
-  if (args.single !== undefined && typeof (args.single) !== "string") {
-    throw new CliError("argument for --single must be string");
-  }
-  if (args.filter !== undefined && typeof (args.filter) !== "string") {
-    throw new CliError("argument for --filter must be string");
-  }
-
-  return args;
 }
 
 function cutMetadata(text) {

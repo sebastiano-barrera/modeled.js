@@ -208,7 +208,7 @@ async function cmdWorker(workerIndex, workerCount) {
     if (i % workerCount !== workerIndex) {
       continue;
     }
-    
+
     const relPath = testConfig.testCases[i];
     const path = relPath.startsWith("/")
       ? relPath
@@ -220,7 +220,11 @@ async function cmdWorker(workerIndex, workerCount) {
       }
 
       const outcomes = await runTest262Case(test262Root, path);
+
       for (const oc of outcomes) {
+        // runTest262Case returns an Error, but we want outcome.error to always be a string
+        // this makes the outcome JSON-encodable (to be returned to the manager) without loss
+        oc.error = oc.error?.toString();
         oc.testcase = path;
         emit(oc);
       }
@@ -274,9 +278,6 @@ async function runTest262Case(test262Root, path) {
     let outcome;
     try {
       outcome = vm.runScript({ path, text: effectiveText });
-      // modeled.VM returns an Error, but we want outcome.error to always be a string
-      // this makes the outcome JSON-encodable (to be returned to the manager) without loss
-      outcome.error = outcome.error.toString();
     } catch (err) {
       if (err instanceof Modeled.ArbitrarilyLeftUnimplemented) {
         throw new SkippedTest(err.message);
@@ -284,7 +285,7 @@ async function runTest262Case(test262Root, path) {
       outcome = {
         outcome: "failure",
         errorCategory: "vm error",
-        error: err.toString(),
+        error: err,
       };
     }
 
@@ -294,8 +295,9 @@ async function runTest262Case(test262Root, path) {
           outcome: "failure",
           errorCategory: "unexpected success",
           expectedError: metadata.negative.type,
-          error:
+          error: new Error(
             `expected error ${metadata.negative.type}, but script completed successfully`,
+          ),
         };
       } else if (outcome.programExceptionName !== metadata.negative.type) {
         outcome.errorCategory = "wrong exception type";

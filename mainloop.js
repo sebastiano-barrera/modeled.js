@@ -1,5 +1,6 @@
 // Import the required Deno modules
 import { parseArgs } from "https://deno.land/std/cli/parse_args.ts";
+import { dirname } from "https://deno.land/std/path/mod.ts";
 
 async function getBranchLength() {
     // Get the number of commits ahead of master
@@ -72,11 +73,13 @@ switch (args._[0]) {
 async function goCommand() {
     await ensureFilesCommitted();
 
+    const here = dirname(import.meta.url);
+    
     const testCommand = [
         "deno",
         "run",
         "--allow-read",
-        "run262.js",
+        `${here}/run262.js`,
     ];
 
     const head = await getHEAD();

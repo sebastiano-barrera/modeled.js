@@ -139,9 +139,20 @@ async function goCommand() {
     const head = await getHEAD();
     const outputFileName = `results-${head}.txt`;
 
-    const output = await runCommand(testCommand);
-    await Deno.writeTextFile(outputFileName, output);
-    console.log(`Test output written to ${outputFileName}`);
+    const exitCode = await watchCommand(testCommand, {
+        onStdoutLine(line) {
+            console.log('stdout | ', line);
+        },
+
+        onStderrLine(line) {
+            console.log('stderr | ', line);
+        },
+    });
+
+    console.log('exit code', exitCode);
+    
+    // await Deno.writeTextFile(outputFileName, output);
+    // console.log(`Test output written to ${outputFileName}`);
 }
 
 async function getHEAD() {

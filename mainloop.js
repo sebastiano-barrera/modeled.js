@@ -150,7 +150,7 @@ async function goCommand() {
     });
 
     console.log('exit code', exitCode);
-
+    
     // await Deno.writeTextFile(outputFileName, output);
     // console.log(`Test output written to ${outputFileName}`);
 }

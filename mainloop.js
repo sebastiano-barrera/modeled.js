@@ -27,6 +27,7 @@ async function runCommand(args) {
     const arg0 = args.shift();
     const cmd = new Deno.Command(arg0, { args: args });
     const { code, stdout, stderr } = await cmd.output();
+    const stdoutText = new TextDecoder().decode(stdout);
 
     if (code !== 0) {
         const stderrText = new TextDecoder().decode(stderr);
@@ -41,7 +42,6 @@ async function runCommand(args) {
         throw new Error(`Command failed. See logged output`);
     }
 
-    const stdoutText = new TextDecoder().decode(stdout);
     return stdoutText.trim();
 }
 

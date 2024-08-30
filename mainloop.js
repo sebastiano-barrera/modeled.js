@@ -79,6 +79,7 @@ async function goCommand() {
         "deno",
         "run",
         "--allow-read",
+        "--allow-run",
         `${here}/run262.js`,
         "--test262",
         test262Path,

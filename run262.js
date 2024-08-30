@@ -5,8 +5,6 @@ import * as YAML from "@std/yaml";
 import { TextLineStream } from "https://deno.land/std@0.224.0/streams/mod.ts";
 import { AssertionError } from "https://deno.land/std@0.224.0/assert/assertion_error.ts";
 
-const WORKER_OUTPUT_PREFIX = "worker output:";
-
 class CliError extends Error {}
 
 class SkippedTest {
@@ -92,7 +90,7 @@ async function cmdSingle() {
 async function cmdManager() {
   const WORKER_COUNT = 4;
 
-  const outputRaw = [];
+  const output = [];
 
   const children = [];
   for (let i = 0; i < WORKER_COUNT; i++) {
@@ -128,12 +126,9 @@ async function cmdManager() {
 
     (async function () {
       for await (const line of out) {
-        if (line.startsWith(WORKER_OUTPUT_PREFIX)) {
-          const jsonEncoded = line.slice(WORKER_OUTPUT_PREFIX.length);
-          outputRaw.push(jsonEncoded);
-        } else {
-          console.log(`worker ${tag} | ${line}`);
-        }
+          const message = JSON.parse(line);
+          console.log(`worker ${message.workerIndex} | ${message.type} ${message.testcase}`);
+          output.push(message);
       }
     })();
   }
@@ -149,8 +144,6 @@ async function cmdManager() {
   }
 
   if (!allOk) Deno.exit(1);
-
-  const output = outputRaw.map(JSON.parse);
 
   const successes = [];
   const skips = [];
@@ -196,13 +189,16 @@ async function cmdManager() {
 }
 
 async function cmdWorker(workerIndex, workerCount) {
-  console.log(`worker ${workerIndex} of ${workerCount}`);
+  function printMessage(type, details) {
+    console.log(JSON.stringify({
+      workerIndex,
+      type,
+      ...details,
+    }));
+  }
+
   const testConfigRaw = await Deno.readTextFile(args.config);
   const testConfig = JSON.parse(testConfigRaw);
-
-  function emit(obj) {
-    console.log(WORKER_OUTPUT_PREFIX, JSON.stringify(obj));
-  }
 
   for (let i = 0; i < testConfig.testCases.length; i++) {
     if (i % workerCount !== workerIndex) {
@@ -219,6 +215,8 @@ async function cmdWorker(workerIndex, workerCount) {
         throw new SkippedTest("skipped via --filter option");
       }
 
+      printMessage("started", { testcase: path });
+
       const outcomes = await runTest262Case(test262Root, path);
 
       for (const oc of outcomes) {
@@ -226,11 +224,11 @@ async function cmdWorker(workerIndex, workerCount) {
         // this makes the outcome JSON-encodable (to be returned to the manager) without loss
         oc.error = oc.error?.toString();
         oc.testcase = path;
-        emit(oc);
+        printMessage("finished", oc);
       }
     } catch (e) {
       if (e instanceof SkippedTest) {
-        emit({
+        printMessage("finished", {
           outcome: "skipped",
           testcase: path,
           error: e.message,
@@ -241,7 +239,6 @@ async function cmdWorker(workerIndex, workerCount) {
 }
 
 async function runTest262Case(test262Root, path) {
-  console.log(" ... running " + path);
   const text = await Deno.readTextFile(path);
   const metadata = YAML.parse(cutMetadata(text)) || {};
 

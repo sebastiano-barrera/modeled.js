@@ -126,9 +126,13 @@ async function cmdManager() {
 
     (async function () {
       for await (const line of out) {
-          const message = JSON.parse(line);
-          console.log(`worker ${message.workerIndex} | ${message.type} ${message.testcase}`);
+        const message = JSON.parse(line);
+        console.log(
+          `worker ${message.workerIndex} | ${message.type} ${message.testcase}`,
+        );
+        if (message.type !== "started") {
           output.push(message);
+        }
       }
     })();
   }
@@ -148,10 +152,12 @@ async function cmdManager() {
   const successes = [];
   const skips = [];
   const failures = [];
+  const weird = [];
   for (const oc of output) {
     if (oc.outcome === "success") successes.push(oc);
     else if (oc.outcome === "skipped") skips.push(oc);
-    else failures.push(oc);
+    else if (oc.outcome === "failure") failures.push(oc);
+    else weird.push(oc);
   }
 
   console.log(`${successes.length} successes:`);
@@ -177,6 +183,13 @@ async function cmdManager() {
         const tag = i == 0 ? "error" : "ectx";
         console.log(`${tag}\t${lines[i]}`);
       }
+    }
+  }
+
+  if (weird.length > 0) {
+    console.log(`${weird.length} cases had unexpected format:`);
+    for (const oc of weird) {
+      console.log(" - ", oc);
     }
   }
 

@@ -26,6 +26,7 @@ async function runCommand(args) {
     const arg0 = args.shift();
     const cmd = new Deno.Command(arg0, { args: args });
     const { code, stdout, stderr } = await cmd.output();
+
     if (code !== 0) {
         const stderrText = new TextDecoder().decode(stderr);
         throw new Error(`Command failed: ${stderrText}`);
@@ -81,25 +82,9 @@ async function goCommand() {
     const head = await getHEAD();
     const outputFileName = `results-${head}.txt`;
 
-    console.log("test command", testCommand);
-
-    const command = new Deno.Command(testCommand[0], {
-        args: testCommand.slice(1),
-    });
-
-    try {
-        const { stdout } = await command.output();
-        await Deno.writeTextFile(
-            outputFileName,
-            new TextDecoder().decode(stdout),
-        );
-        console.log(`Test output written to ${outputFileName}`);
-    } catch (error) {
-        console.error(`Test command failed: ${error.message}`);
-        if (error.stderr) {
-            console.error(new TextDecoder().decode(error.stderr));
-        }
-    }
+    const output = await runCommand(testCommand);
+    await Deno.writeTextFile(outputFileName, output);
+    console.log(`Test output written to ${outputFileName}`);
 }
 
 async function getHEAD() {

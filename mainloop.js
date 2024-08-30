@@ -74,12 +74,16 @@ async function goCommand() {
     await ensureFilesCommitted();
 
     const here = dirname(import.meta.url);
-    
+
     const testCommand = [
         "deno",
         "run",
         "--allow-read",
         `${here}/run262.js`,
+        "--test262",
+        test262Path,
+        "--config",
+        configPath,
     ];
 
     const head = await getHEAD();

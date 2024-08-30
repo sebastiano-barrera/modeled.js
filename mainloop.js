@@ -1,6 +1,7 @@
 // Import the required Deno modules
 import { parseArgs } from "https://deno.land/std/cli/parse_args.ts";
 import { dirname } from "https://deno.land/std/path/mod.ts";
+import { TextLineStream } from "https://deno.land/std@0.224.0/streams/text_line_stream.ts";
 
 async function getBranchLength() {
     // Get the number of commits ahead of master
@@ -23,7 +24,7 @@ async function getCurrentBranchName() {
 
 /** @param args {string[]} */
 async function runCommand(args) {
-    console.log("running command", args.join(' '));
+    console.log("running command", args.join(" "));
     const arg0 = args.shift();
     const cmd = new Deno.Command(arg0, { args: args });
     const { code, stdout, stderr } = await cmd.output();
@@ -31,18 +32,58 @@ async function runCommand(args) {
 
     if (code !== 0) {
         const stderrText = new TextDecoder().decode(stderr);
-        console.error('command failed');
-        console.error('stderr:');
-        for (const line of stderrText.split('\n'))
-            console.error('| ', line);
+        console.error("command failed");
+        console.error("stderr:");
+        for (const line of stderrText.split("\n")) {
+            console.error("| ", line);
+        }
         console.error("stdout:");
-        for (const line of stdoutText.split('\n'))
-            console.error('| ', line);
+        for (const line of stdoutText.split("\n")) {
+            console.error("| ", line);
+        }
 
         throw new Error(`Command failed. See logged output`);
     }
 
     return stdoutText.trim();
+}
+
+/**
+ * Runs a shell command and executes an event handler for each line of output.
+ * @param {string[]} args - The command and its arguments as an array.
+ * @param {(line: string) => void} lineHandler - Function to handle each line of output.
+ * @returns {Promise<number>} The exit code of the command.
+ */
+async function watchCommand(args, handlers) {
+    const arg0 = args.shift();
+    const cmd = new Deno.Command(arg0, {
+        args: args,
+        stdout: "piped",
+        stderr: "piped",
+    });
+
+    const child = cmd.spawn();
+
+    function pipeStreamToHandler(stream, handler) {
+        stream
+            .pipeTo(new TextDecoderStream("utf-8"))
+            .pipeTo(new TextLineStream())
+            .pipeTo({
+                write(chunk) {
+                    handlers.onStdoutLine(chunk);
+                },
+            });
+    }
+
+    if (handlers?.onStdoutLine) {
+        pipeStreamToHandler(child.stdout, handlers.onStdoutLine);
+    }
+    if (handlers?.onStderrLine) {
+        pipeStreamToHandler(child.stderr, handlers.onStderrLine);
+    }
+
+    const { code } = await child.status;
+    return code;
 }
 
 const branchName = await getCurrentBranchName();

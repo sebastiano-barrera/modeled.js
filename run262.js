@@ -94,47 +94,22 @@ async function cmdManager() {
 
   const children = [];
   for (let i = 0; i < WORKER_COUNT; i++) {
-    const childArgs = [
-      "run",
-      "--allow-read",
-      import.meta.filename,
-      "--worker",
-      `${i}/${WORKER_COUNT}`,
-    ].concat(Deno.args);
-
-    const cmd = new Deno.Command(Deno.execPath(), {
-      args: childArgs,
-      stdout: "piped",
-      stderr: "piped",
-    });
-    const child = cmd.spawn();
-    children.push(child);
-
-    const out = child.stdout
-      .pipeThrough(new TextDecoderStream())
-      .pipeThrough(new TextLineStream());
-    const stderrLines = child.stderr
-      .pipeThrough(new TextDecoderStream())
-      .pipeThrough(new TextLineStream());
     const tag = String(i).padEnd(4);
 
-    (async function () {
-      for await (const line of stderrLines) {
+    children.push(spawnWorker(i, WORKER_COUNT, {
+      onStderrLine: (line) => {
         console.log(`worker ${tag} ! ${line}`);
-      }
-    })();
+      },
 
-    (async function () {
-      for await (const line of out) {
-        const message = JSON.parse(line);
+      onMessage: (message) => {
         console.log(
           `worker ${message.workerIndex} | ${message.type} ${message.testcase}`,
         );
         if (message.type !== "started") {
           output.push(message);
         }
-      }
-    })();
+      },
+    }));
   }
 
   if (children.length !== WORKER_COUNT) throw new AssertionError();
@@ -199,6 +174,51 @@ async function cmdManager() {
     "color: yellow",
     "color: red",
   );
+}
+
+function spawnWorker(workerIndex, workerCount, handlers) {
+  const childArgs = [
+    "run",
+    "--allow-read",
+    import.meta.filename,
+    "--worker",
+    `${workerIndex}/${workerCount}`,
+  ].concat(Deno.args);
+
+  const cmd = new Deno.Command(Deno.execPath(), {
+    args: childArgs,
+    stdout: "piped",
+    stderr: "piped",
+  });
+  const child = cmd.spawn();
+
+  if (handlers?.onStderrLine) {
+    child.stderr
+      .pipeThrough(new TextDecoderStream())
+      .pipeThrough(new TextLineStream())
+      .pipeTo(
+        new WritableStream({
+          write(line) {
+            handlers.onStderrLine(line);
+          },
+        }),
+      );
+  }
+
+  if (handlers?.onMessage) {
+    child.stdout
+      .pipeThrough(new TextDecoderStream())
+      .pipeThrough(new TextLineStream())
+      .pipeTo(
+        new WritableStream({
+          write(line) {
+            handlers.onMessage(JSON.parse(line));
+          },
+        }),
+      );
+  }
+
+  return child;
 }
 
 async function cmdWorker(workerIndex, workerCount) {

@@ -66,7 +66,7 @@ async function watchCommand(args, handlers) {
 
     function pipeStreamToHandler(stream, handler) {
         stream
-            .pipeTo(new TextDecoderStream("utf-8"))
+            .pipeTo(new TextDecoderStream())
             .pipeTo(new TextLineStream())
             .pipeTo({
                 write(chunk) {
@@ -150,7 +150,7 @@ async function goCommand() {
     });
 
     console.log('exit code', exitCode);
-    
+
     // await Deno.writeTextFile(outputFileName, output);
     // console.log(`Test output written to ${outputFileName}`);
 }

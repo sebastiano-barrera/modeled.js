@@ -23,7 +23,7 @@ async function getCurrentBranchName() {
 
 /** @param args {string[]} */
 async function runCommand(args) {
-    console.log("running command", args);
+    console.log("running command", args.join(' '));
     const arg0 = args.shift();
     const cmd = new Deno.Command(arg0, { args: args });
     const { code, stdout, stderr } = await cmd.output();

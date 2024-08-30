@@ -30,7 +30,15 @@ async function runCommand(args) {
 
     if (code !== 0) {
         const stderrText = new TextDecoder().decode(stderr);
-        throw new Error(`Command failed: ${stderrText}`);
+        console.error('command failed');
+        console.error('stderr:');
+        for (const line of stderrText.split('\n'))
+            console.error('| ', line);
+        console.error("stdout:");
+        for (const line of stdoutText.split('\n'))
+            console.error('| ', line);
+
+        throw new Error(`Command failed. See logged output`);
     }
 
     const stdoutText = new TextDecoder().decode(stdout);

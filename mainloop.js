@@ -66,8 +66,8 @@ async function watchCommand(args, handlers) {
 
     function pipeStreamToHandler(stream, handler) {
         stream
-            .pipeTo(new TextDecoderStream())
-            .pipeTo(new TextLineStream())
+            .pipeThrough(new TextDecoderStream())
+            .pipeThrough(new TextLineStream())
             .pipeTo({
                 write(chunk) {
                     handlers.onStdoutLine(chunk);

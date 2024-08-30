@@ -72,6 +72,8 @@ async function goCommand() {
     const head = await getHEAD();
     const outputFileName = `results-${head}.txt`;
 
+    console.log('test command', testCommand)
+
     const command = new Deno.Command(testCommand[0], {
         args: testCommand.slice(1),
     });

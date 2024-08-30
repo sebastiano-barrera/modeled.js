@@ -68,11 +68,11 @@ async function watchCommand(args, handlers) {
         stream
             .pipeThrough(new TextDecoderStream())
             .pipeThrough(new TextLineStream())
-            .pipeTo({
+            .pipeTo(new WritableStream({
                 write(chunk) {
                     handlers.onStdoutLine(chunk);
                 },
-            });
+            }));
     }
 
     if (handlers?.onStdoutLine) {

@@ -193,21 +193,17 @@ async function fakeGoCommand() {
                 return `${indicator} [${index + 1}] ${loop.name}`;
             }).join(' | ')
          );
+        const statusStr = model.currentProcess ? 'running' : 'idle';
+        console.log(`${statusStr} %c${model.statusMessage}`, 'color: red');
         console.log();
 
-        console.log('status', (model.currentProcess ? 'running' : 'idle'));
-        console.log('%c' + model.statusMessage, 'color: red');
-        console.log();
-
-        if (model.summary) {
-            for (const key in model.summary) {
-                const count = model.summary[key];
-                console.log(
-                    key.padEnd(10, '.') + String(count).padStart(4, '.'),
-                    '| ',
-                    '*'.repeat(count),
-                );
-            }
+        for (const key in model.summary) {
+            const count = model.summary[key];
+            console.log(
+                key.padEnd(10, '.') + String(count).padStart(4, '.'),
+                '| ',
+                '*'.repeat(count),
+            );
         }
         console.log();
 

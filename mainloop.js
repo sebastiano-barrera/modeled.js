@@ -161,8 +161,8 @@ async function goCommand() {
         this.skipsCount = 0;
     }
 
+    let currentLoopIndex = 0;
     const model = {
-        currentLoopIndex: 0,
         loops: [
             new Loop("focused"),
             new Loop("full"),
@@ -170,8 +170,9 @@ async function goCommand() {
         statusMessage: '',
     };
 
-    const redrawDbnc = new Debouncer(100);
     let currentProcess = new Process();
+
+    const redrawDbnc = new Debouncer(100);
     currentProcess.onMessage = function(message) {
         model.summary ??= {};
         model.summary[message.outcome] ??= 0;
@@ -194,7 +195,7 @@ async function goCommand() {
         console.log('loops    ',
             model.loops
             .map((loop, index) =>  {
-                let indicator = (index === model.currentLoopIndex ? '*': ' ');
+                let indicator = (index === currentLoopIndex ? '*': ' ');
                 return `${indicator} [${index + 1}] ${loop.name}`;
             }).join(' | ')
          );
@@ -225,7 +226,7 @@ async function goCommand() {
         label: 'Switch to loop #' + (n + 1),
         hidden: true,
         action() { 
-            if (n < model.loops.length) model.currentLoopIndex = n;
+            if (n < model.loops.length) currentLoopIndex = n;
         }
     });
     const commands = {

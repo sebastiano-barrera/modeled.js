@@ -58,6 +58,18 @@ if (args.single) {
   const workerIndex = Number(toks[0]);
   const workerCount = Number(toks[1]);
   await cmdWorker(workerIndex, workerCount);
+} else if(args.fanout) {
+  const workerCount = Number(args.fanout);
+  const ok =await fanout(workerCount, {
+    onStderrLine(tag, line) {
+      console.error(`worker ${tag}: ${line}`);
+    },
+    onMessage(_tag, msg) {
+      // _tag not needed: msg already contains workerIndex
+      console.log(JSON.stringify(msg));
+    },
+  });
+  Deno.exit(ok ? 0 : 1);
 } else {
   cmdManager();
 }
@@ -100,9 +112,9 @@ async function fanout(workerCount, handlers) {
 
   let allOk = true;
   for (let i = 0; i < workerCount; i++) {
-    console.log(`waiting child ${i}...`);
+    console.error(`waiting child ${i}...`);
     const status = await children[i].status;
-    console.log(`child ${i} finished with status ${status.code}`);
+    console.error(`child ${i} finished with status ${status.code}`);
     allOk = allOk && status.success;
   }
 
@@ -124,7 +136,6 @@ async function cmdManager() {
       output.push(message);
     }
   };
-
 
   const allOk = await fanout(WORKER_COUNT, {onStderrLine, onMessage});
   if (!allOk) Deno.exit(1);

@@ -120,6 +120,7 @@ switch (args._[0]) {
 }
 
 async function goCommand() {
+    return await fakeGoCommand();
     await ensureFilesCommitted();
 
     const here = dirname(import.meta.url);
@@ -154,6 +155,55 @@ async function goCommand() {
     
     // await Deno.writeTextFile(outputFileName, output);
     // console.log(`Test output written to ${outputFileName}`);
+}
+
+async function fakeGoCommand() {
+    let quit = false;
+    
+    const model = {
+        countdown: 10,
+    };
+
+    Deno.stdin.setRaw(true, {cbreak: true});
+    const keybuf = new Uint8Array(1);
+    async function readKey() {
+        await Deno.stdin.read(keybuf);
+        return String.fromCodePoint(keybuf[0]);
+    }
+
+    function redraw() {
+        console.clear();
+        console.log('countdown', model.countdown);
+        console.log();
+        for (const cmdKey in commands) {
+            const cmd = commands[cmdKey];
+            console.log(`[${cmdKey}] ${cmd.label}`);
+        }
+    }
+
+    const commands = {
+        n: {
+            label: 'Next',
+            action() {
+                model.countdown--;
+            },
+        },
+        q: {
+            label: 'Quit',
+            action() { quit = true; }
+        }
+    };
+
+    while (!quit) {
+        redraw();
+
+        let cmd;
+        do{ 
+            const key = await readKey();
+            cmd = commands[key];
+        } while(cmd === undefined);
+        cmd.action();
+    }
 }
 
 async function getHEAD() {

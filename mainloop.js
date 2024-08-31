@@ -188,11 +188,10 @@ async function fakeGoCommand() {
         console.clear();
         console.log('loops    ',
             model.loops
-            .map((loop, index) => 
-                 index === model.currentLoopIndex
-                 ? `* ${loop.name}`
-                 : loop.name
-            ).join(' | ')
+            .map((loop, index) =>  {
+                let indicator = (index === model.currentLoopIndex ? '*': ' ');
+                return `${indicator} [${index + 1}] ${loop.name}`;
+            }).join(' | ')
          );
         console.log();
 

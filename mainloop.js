@@ -198,7 +198,7 @@ async function goCommand() {
                 return `${indicator} [${index + 1}] ${loop.name}`;
             }).join(' | ')
          );
-        const statusStr = currentProcess ? 'running' : 'idle';
+        const statusStr = currentProcess.isActive ? 'running' : 'idle';
         console.log(`${statusStr} %c${model.statusMessage}`, 'color: red');
         console.log();
 

@@ -247,6 +247,22 @@ async function fakeGoCommand() {
         this.onFinish?.();
     };
 
+    class Debouncer {
+        constructor(limit) { 
+            this.limit = limit;
+            this.pass = true;
+        }
+        tick() {
+            if (this.pass === false) return false;
+            this.pass = false;
+            setTimeout(
+                () => { this.pass = true; }, 
+                this.limit
+            );
+            return true;
+        }
+    }
+
     const cmdSwitch = n => ({
         label: 'Switch to loop #' + (n + 1),
         action() { 
@@ -273,13 +289,17 @@ async function fakeGoCommand() {
                     return;
                 }
 
+                const redrawDbnc = new Debouncer(500);
+
                 model.summary = null;
                 model.currentProcess = new Process();
                 model.currentProcess.onMessage = function(message) {
                     model.summary ??= {};
                     model.summary[message.outcome] ??= 0;
                     model.summary[message.outcome]++;
-                    redraw();
+                    if (redrawDbnc.tick()) {
+                        redraw();
+                    }
                 };
                 model.currentProcess.onFinish = function() {
                     model.currentProcess = null;

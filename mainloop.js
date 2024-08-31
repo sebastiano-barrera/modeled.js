@@ -162,11 +162,11 @@ async function goCommand() {
     }
 
     let currentLoopIndex = 0;
+    let loops = [
+        new Loop("focused"),
+        new Loop("full"),
+    ];
     const model = {
-        loops: [
-            new Loop("focused"),
-            new Loop("full"),
-        ],
         statusMessage: '',
     };
 
@@ -193,8 +193,7 @@ async function goCommand() {
     function redraw() {
         console.clear();
         console.log('loops    ',
-            model.loops
-            .map((loop, index) =>  {
+            loops.map((loop, index) =>  {
                 let indicator = (index === currentLoopIndex ? '*': ' ');
                 return `${indicator} [${index + 1}] ${loop.name}`;
             }).join(' | ')
@@ -226,7 +225,7 @@ async function goCommand() {
         label: 'Switch to loop #' + (n + 1),
         hidden: true,
         action() { 
-            if (n < model.loops.length) currentLoopIndex = n;
+            if (n < loops.length) currentLoopIndex = n;
         }
     });
     const commands = {

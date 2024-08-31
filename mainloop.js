@@ -219,34 +219,40 @@ async function fakeGoCommand() {
         }
     }
 
-    function Process() {
-        this.count = 200;
-        this.intervalID = null;
-    }
-    Process.prototype.start = function() {
-        if (this.intervalID !== null) return;
-        this.intervalID = setInterval(() => {
-            this.count--;
-            if (this.count <= 0) {
-                this.cancel();
-                return;
-            }
+    class Process{
+        constructor() {
+            this.count = 200;
+            this.intervalID = null;
+        }
 
-            if (this.onMessage === undefined) return;
-            const dice = Math.random();
-            let msg;
-            if (dice < 0.3) { msg = { outcome: 'failure' }; }
-            else if (dice < 0.6) { msg = { outcome: 'skipped' }; }
-            else { msg = { outcome: 'success' }; }
+        start() {
+            if (this.intervalID !== null) return;
 
-            this.onMessage(msg);
-        }, 100);
+            this.intervalID = setInterval(() => {
+                this.count--;
+                if (this.count <= 0) {
+                    this.cancel();
+                    return;
+                }
+
+                if (this.onMessage === undefined) return;
+                const dice = Math.random();
+                let msg;
+                if (dice < 0.3) { msg = { outcome: 'failure' }; }
+                else if (dice < 0.6) { msg = { outcome: 'skipped' }; }
+                else { msg = { outcome: 'success' }; }
+
+                this.onMessage(msg);
+            }, 100);
+        }
+
+        cancel() {
+            if (this.intervalID === null) return;
+            clearInterval(this.intervalID);
+            this.onFinish?.();
+        }
     }
-    Process.prototype.cancel = function() {
-        if (this.intervalID === null) return;
-        clearInterval(this.intervalID);
-        this.onFinish?.();
-    };
+
 
     class Debouncer {
         constructor(limit) { 

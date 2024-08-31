@@ -51,7 +51,7 @@ async function runCommand(args) {
 /**
  * Runs a shell command and executes an event handler for each line of output.
  * @param {string[]} args - The command and its arguments as an array.
- * @param {(line: string) => void} lineHandler - Function to handle each line of output.
+ * @param {(line: string) => void} lineHandler - Called for each line of output.
  * @returns {Promise<number>} The exit code of the command.
  */
 async function watchCommand(args, handlers) {
@@ -134,6 +134,7 @@ async function goCommand() {
         test262Path,
         "--config",
         configPath,
+        "--fanout", "4",
     ];
 
     const head = await getHEAD();

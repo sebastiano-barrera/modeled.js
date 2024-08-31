@@ -176,7 +176,7 @@ async function goCommand() {
     };
     summary.reset();
 
-    let currentProcess = new Process();
+    const currentProcess = new Process();
 
     const redrawDbnc = new Debouncer(100);
     currentProcess.onMessage = function(message) {
@@ -264,7 +264,6 @@ async function goCommand() {
 
                 statusMessage = '';
                 currentProcess.cancel();
-                currentProcess = null;
             },
         },
         
@@ -283,7 +282,7 @@ async function goCommand() {
         await cmd.action();
     }
 
-    currentProcess?.cancel();
+    currentProcess.cancel();
 }
 
 

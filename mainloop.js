@@ -213,7 +213,9 @@ async function fakeGoCommand() {
 
         for (const cmdKey in commands) {
             const cmd = commands[cmdKey];
-            console.log(`[${cmdKey}] ${cmd.label}`);
+            if (!cmd.hidden) {
+                console.log(`[${cmdKey}] ${cmd.label}`);
+            }
         }
     }
 
@@ -264,6 +266,7 @@ async function fakeGoCommand() {
 
     const cmdSwitch = n => ({
         label: 'Switch to loop #' + (n + 1),
+        hidden: true,
         action() { 
             if (n < model.loops.length) model.currentLoopIndex = n;
         }

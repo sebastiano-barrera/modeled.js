@@ -180,10 +180,7 @@ async function goCommand() {
             redraw();
         }
     };
-    currentProcess.onFinish = function() {
-        currentProcess = null;
-        redraw();
-    };
+    currentProcess.onFinish = function() { redraw(); };
 
     Deno.stdin.setRaw(true, {cbreak: true});
     const keybuf = new Uint8Array(1);

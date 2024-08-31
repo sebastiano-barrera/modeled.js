@@ -177,7 +177,6 @@ async function goCommand() {
     summary.reset();
 
     const currentProcess = new Process();
-
     const redrawDbnc = new Debouncer(100);
     currentProcess.onMessage = function(message) {
         summary[message.outcome]++;
@@ -223,7 +222,6 @@ async function goCommand() {
             }
         }
     }
-
 
     const cmdSwitch = n => ({
         label: 'Switch to loop #' + (n + 1),
@@ -275,7 +273,7 @@ async function goCommand() {
         redraw();
 
         let cmd;
-        do{ 
+        do { 
             const key = await readKey();
             cmd = commands[key];
         } while(cmd === undefined);

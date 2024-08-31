@@ -215,7 +215,7 @@ async function fakeGoCommand() {
         }
     }
 
-    class Process{
+    class Process {
         constructor() {
             this.count = 200;
             this.intervalID = null;
@@ -290,6 +290,7 @@ async function fakeGoCommand() {
                 const redrawDbnc = new Debouncer(500);
 
                 model.summary = null;
+                model.statusMessage = '';
                 model.currentProcess = new Process();
                 model.currentProcess.onMessage = function(message) {
                     model.summary ??= {};
@@ -315,6 +316,7 @@ async function fakeGoCommand() {
                     return;
                 }
 
+                model.statusMessage = '';
                 model.currentProcess.cancel();
                 model.currentProcess = null;
             },

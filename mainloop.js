@@ -238,9 +238,9 @@ async function fakeGoCommand() {
                 if (this.onMessage === undefined) return;
                 const dice = Math.random();
                 let msg;
-                if (dice < 0.3) { msg = { outcome: 'failure' }; }
+                if (dice < 0.3)      { msg = { outcome: 'failure' }; }
                 else if (dice < 0.6) { msg = { outcome: 'skipped' }; }
-                else { msg = { outcome: 'success' }; }
+                else                 { msg = { outcome: 'success' }; }
 
                 this.onMessage(msg);
             }, 100);
@@ -278,14 +278,8 @@ async function fakeGoCommand() {
         }
     });
     const commands = {
-        n: {
-            label: 'Next',
-            action() {
-                model.countdown--;
-            },
-        },
         q: {
-            label: 'Quit',
+            label: 'quit',
             action() { quit = true; }
         },
 

@@ -103,6 +103,22 @@ class Process {
     }
 }
 
+class Debouncer {
+    constructor(limit) { 
+        this.limit = limit;
+        this.pass = true;
+    }
+    tick() {
+        if (this.pass === false) return false;
+        this.pass = false;
+        setTimeout(
+            () => { this.pass = true; }, 
+            this.limit
+        );
+        return true;
+    }
+}
+
 const branchName = await getCurrentBranchName();
 const branchLength = await getBranchLength();
 
@@ -152,6 +168,8 @@ async function goCommand() {
         ],
         statusMessage: '',
     };
+
+    const redrawDbnc = new Debouncer(500);
     let currentProcess = new Process();
     currentProcess.onMessage = function(message) {
         model.summary ??= {};
@@ -204,21 +222,6 @@ async function goCommand() {
         }
     }
 
-    class Debouncer {
-        constructor(limit) { 
-            this.limit = limit;
-            this.pass = true;
-        }
-        tick() {
-            if (this.pass === false) return false;
-            this.pass = false;
-            setTimeout(
-                () => { this.pass = true; }, 
-                this.limit
-            );
-            return true;
-        }
-    }
 
     const cmdSwitch = n => ({
         label: 'Switch to loop #' + (n + 1),
@@ -243,7 +246,6 @@ async function goCommand() {
 
                 await ensureFilesCommitted();
 
-                const redrawDbnc = new Debouncer(500);
 
                 model.summary = null;
                 model.statusMessage = '';

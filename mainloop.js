@@ -160,8 +160,21 @@ async function goCommand() {
 async function fakeGoCommand() {
     let quit = false;
     
+    function Loop(name) {
+        this.name = name;
+        this.skipsCount = 0;
+    }
+
     const model = {
-        countdown: 10,
+        currentLoopIndex: 0,
+        loops: [
+            new Loop("focused"),
+            new Loop("full"),
+        ],
+
+        currentlyRunning: null,
+
+        statusMessage: '',
     };
 
     Deno.stdin.setRaw(true, {cbreak: true});
@@ -173,14 +186,32 @@ async function fakeGoCommand() {
 
     function redraw() {
         console.clear();
-        console.log('countdown', model.countdown);
+        console.log('loops    ',
+            model.loops
+            .map((loop, index) => 
+                 index === model.currentLoopIndex
+                 ? `* ${loop.name}`
+                 : loop.name
+            ).join(' | ')
+         );
         console.log();
+
+        console.log('status', (model.currentlyRunning ? 'running' : 'idle'));
+        console.log('%c' + model.statusMessage, 'color: red');
+        console.log();
+
         for (const cmdKey in commands) {
             const cmd = commands[cmdKey];
             console.log(`[${cmdKey}] ${cmd.label}`);
         }
     }
 
+    const cmdSwitch = n => ({
+        label: 'Switch to loop #' + (n + 1),
+        action() { 
+            if (n < model.loops.length) model.currentLoopIndex = n;
+        }
+    });
     const commands = {
         n: {
             label: 'Next',
@@ -191,7 +222,39 @@ async function fakeGoCommand() {
         q: {
             label: 'Quit',
             action() { quit = true; }
-        }
+        },
+
+        s: {
+            label: 'start',
+            action() {
+                if (model.currentlyRunning !== null) {
+                    model.statusMessage = 'currently running!';
+                    return;
+                }
+
+                model.currentlyRunning = {
+                    cancel() {
+                        model.statusMessage = 'canceled!';
+                    }
+                };
+            },
+        },
+
+        c: {
+            label: 'cancel',
+            action() {
+                if (model.currentlyRunning === null) {
+                    model.statusMessage = 'nothing running';
+                    return;
+                }
+
+                model.currentlyRunning.cancel();
+                model.currentlyRunning = null;
+            },
+        },
+        
+        "1": cmdSwitch(0),
+        "2": cmdSwitch(1),
     };
 
     while (!quit) {

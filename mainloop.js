@@ -170,7 +170,7 @@ async function goCommand() {
         statusMessage: '',
     };
 
-    const redrawDbnc = new Debouncer(500);
+    const redrawDbnc = new Debouncer(100);
     let currentProcess = new Process();
     currentProcess.onMessage = function(message) {
         model.summary ??= {};

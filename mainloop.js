@@ -48,42 +48,59 @@ async function runCommand(args) {
     return stdoutText.trim();
 }
 
-/**
- * Runs a shell command and executes an event handler for each line of output.
- * @param {string[]} args - The command and its arguments as an array.
- * @param {(line: string) => void} lineHandler - Called for each line of output.
- * @returns {Promise<number>} The exit code of the command.
- */
-async function watchCommand(args, handlers) {
-    const arg0 = args.shift();
-    const cmd = new Deno.Command(arg0, {
-        args: args,
-        stdout: "piped",
-        stderr: "piped",
-    });
-
-    const child = cmd.spawn();
-
-    function pipeStreamToHandler(stream, handler) {
-        stream
-            .pipeThrough(new TextDecoderStream())
-            .pipeThrough(new TextLineStream())
-            .pipeTo(new WritableStream({
-                write(chunk) {
-                    handlers.onStdoutLine(chunk);
-                },
-            }));
+class Process {
+    constructor() {
+        this.child = null;
     }
 
-    if (handlers?.onStdoutLine) {
-        pipeStreamToHandler(child.stdout, handlers.onStdoutLine);
-    }
-    if (handlers?.onStderrLine) {
-        pipeStreamToHandler(child.stderr, handlers.onStderrLine);
+    start() {
+        if (this.child !== null) {
+            return;
+        }
+        
+        // const head = await getHEAD();
+        // const outputFileName = `results-${head}.txt`;
+
+        const here = dirname(import.meta.url);
+        const cmd = new Deno.Command(Deno.execPath(), {
+            args: [
+                "run", "--allow-read", "--allow-run",
+                `${here}/run262.js`,
+                "--test262", test262Path,
+                "--config", configPath,
+                "--fanout", "4",
+            ],
+            stdout: "piped",
+            stderr: "piped",
+        });
+        this.child = cmd.spawn();
+
+        if (this.onMessage) {
+            pipeStreamToHandler(
+                this.child.stdout,
+                line => this.onMessage?.(JSON.parse(line)),
+            );
+        }
+
+        if (this.onStderrLine) 
+            pipeStreamToHandler(this.child.stderr, line => this.onStderrLine(line));
+
+        this.child.status
+            .then(exitCode => { this.child = null; })
+            .then(exitCode => {
+                this.onFinish?.({ exitCode });
+            });
     }
 
-    const { code } = await child.status;
-    return code;
+    get isActive() { return this.child !== null; }
+
+    async cancel() {
+        if (this.child === null) {
+            return;
+        }
+
+        this.child.kill();
+    }
 }
 
 const branchName = await getCurrentBranchName();
@@ -120,44 +137,6 @@ switch (args._[0]) {
 }
 
 async function goCommand() {
-    return await fakeGoCommand();
-    await ensureFilesCommitted();
-
-    const here = dirname(import.meta.url);
-
-    const testCommand = [
-        "deno",
-        "run",
-        "--allow-read",
-        "--allow-run",
-        `${here}/run262.js`,
-        "--test262",
-        test262Path,
-        "--config",
-        configPath,
-        "--fanout", "4",
-    ];
-
-    const head = await getHEAD();
-    const outputFileName = `results-${head}.txt`;
-
-    const exitCode = await watchCommand(testCommand, {
-        onStdoutLine(line) {
-            console.log('stdout | ', line);
-        },
-
-        onStderrLine(line) {
-            console.log('stderr | ', line);
-        },
-    });
-
-    console.log('exit code', exitCode);
-    
-    // await Deno.writeTextFile(outputFileName, output);
-    // console.log(`Test output written to ${outputFileName}`);
-}
-
-async function fakeGoCommand() {
     let quit = false;
     
     function Loop(name) {
@@ -171,10 +150,20 @@ async function fakeGoCommand() {
             new Loop("focused"),
             new Loop("full"),
         ],
-
-        currentProcess: null,
-
         statusMessage: '',
+    };
+    let currentProcess = new Process();
+    currentProcess.onMessage = function(message) {
+        model.summary ??= {};
+        model.summary[message.outcome] ??= 0;
+        model.summary[message.outcome]++;
+        if (redrawDbnc.tick()) {
+            redraw();
+        }
+    };
+    currentProcess.onFinish = function() {
+        currentProcess = null;
+        redraw();
     };
 
     Deno.stdin.setRaw(true, {cbreak: true});
@@ -193,7 +182,7 @@ async function fakeGoCommand() {
                 return `${indicator} [${index + 1}] ${loop.name}`;
             }).join(' | ')
          );
-        const statusStr = model.currentProcess ? 'running' : 'idle';
+        const statusStr = currentProcess ? 'running' : 'idle';
         console.log(`${statusStr} %c${model.statusMessage}`, 'color: red');
         console.log();
 
@@ -214,41 +203,6 @@ async function fakeGoCommand() {
             }
         }
     }
-
-    class Process {
-        constructor() {
-            this.count = 200;
-            this.intervalID = null;
-        }
-
-        start() {
-            if (this.intervalID !== null) return;
-
-            this.intervalID = setInterval(() => {
-                this.count--;
-                if (this.count <= 0) {
-                    this.cancel();
-                    return;
-                }
-
-                if (this.onMessage === undefined) return;
-                const dice = Math.random();
-                let msg;
-                if (dice < 0.3)      { msg = { outcome: 'failure' }; }
-                else if (dice < 0.6) { msg = { outcome: 'skipped' }; }
-                else                 { msg = { outcome: 'success' }; }
-
-                this.onMessage(msg);
-            }, 100);
-        }
-
-        cancel() {
-            if (this.intervalID === null) return;
-            clearInterval(this.intervalID);
-            this.onFinish?.();
-        }
-    }
-
 
     class Debouncer {
         constructor(limit) { 
@@ -281,44 +235,33 @@ async function fakeGoCommand() {
 
         s: {
             label: 'start',
-            action() {
-                if (model.currentProcess !== null) {
+            async action() {
+                if (currentProcess.isActive) {
                     model.statusMessage = 'currently running!';
                     return;
                 }
+
+                await ensureFilesCommitted();
 
                 const redrawDbnc = new Debouncer(500);
 
                 model.summary = null;
                 model.statusMessage = '';
-                model.currentProcess = new Process();
-                model.currentProcess.onMessage = function(message) {
-                    model.summary ??= {};
-                    model.summary[message.outcome] ??= 0;
-                    model.summary[message.outcome]++;
-                    if (redrawDbnc.tick()) {
-                        redraw();
-                    }
-                };
-                model.currentProcess.onFinish = function() {
-                    model.currentProcess = null;
-                    redraw();
-                };
-                model.currentProcess.start();
+                currentProcess.start();
             },
         },
 
         c: {
             label: 'cancel',
             action() {
-                if (model.currentProcess === null) {
+                if (!currentProcess.isActive) {
                     model.statusMessage = 'nothing running';
                     return;
                 }
 
                 model.statusMessage = '';
-                model.currentProcess.cancel();
-                model.currentProcess = null;
+                currentProcess.cancel();
+                currentProcess = null;
             },
         },
         
@@ -334,11 +277,13 @@ async function fakeGoCommand() {
             const key = await readKey();
             cmd = commands[key];
         } while(cmd === undefined);
-        cmd.action();
+        await cmd.action();
     }
 
-    model.currentProcess?.cancel();
+    currentProcess?.cancel();
 }
+
+
 
 async function getHEAD() {
     return await runCommand([
@@ -366,3 +311,11 @@ async function ensureFilesCommitted() {
 async function squashCommand() {
     throw new Error("not yet implemented");
 }
+
+function pipeStreamToHandler(stream, handler) {
+    stream
+        .pipeThrough(new TextDecoderStream())
+        .pipeThrough(new TextLineStream())
+        .pipeTo(new WritableStream({ write: handler }));
+}
+

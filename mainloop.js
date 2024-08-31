@@ -82,8 +82,9 @@ class Process {
             );
         }
 
-        if (this.onStderrLine) 
+        if (this.onStderrLine) {
             pipeStreamToHandler(this.child.stderr, line => this.onStderrLine(line));
+        }
 
         this.child.status
             .then(exitCode => { this.child = null; })

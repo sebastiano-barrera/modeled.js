@@ -166,17 +166,21 @@ async function goCommand() {
         new Loop("focused"),
         new Loop("full"),
     ];
-    const model = {
-        statusMessage: '',
+    let statusMessage = '';
+    let summary = {
+        reset() {
+            this.success = 0;
+            this.failure = 0;
+            this.skipped = 0;
+        }
     };
+    summary.reset();
 
     let currentProcess = new Process();
 
     const redrawDbnc = new Debouncer(100);
     currentProcess.onMessage = function(message) {
-        model.summary ??= {};
-        model.summary[message.outcome] ??= 0;
-        model.summary[message.outcome]++;
+        summary[message.outcome]++;
         if (redrawDbnc.tick()) {
             redraw();
         }
@@ -199,11 +203,11 @@ async function goCommand() {
             }).join(' | ')
          );
         const statusStr = currentProcess.isActive ? 'running' : 'idle';
-        console.log(`${statusStr} %c${model.statusMessage}`, 'color: red');
+        console.log(`${statusStr} %c${statusMessage}`, 'color: red');
         console.log();
 
-        for (const key in model.summary) {
-            const count = model.summary[key];
+        for (const key of ['success', 'failure', 'skipped']) {
+            const count = summary[key];
             console.log(
                 key.padEnd(10, '.') + String(count).padStart(4, '.'),
                 '| ',
@@ -238,15 +242,14 @@ async function goCommand() {
             label: 'start',
             async action() {
                 if (currentProcess.isActive) {
-                    model.statusMessage = 'currently running!';
+                    statusMessage = 'currently running!';
                     return;
                 }
 
                 await ensureFilesCommitted();
 
-
-                model.summary = null;
-                model.statusMessage = '';
+                summary.reset();
+                statusMessage = '';
                 currentProcess.start();
             },
         },
@@ -255,11 +258,11 @@ async function goCommand() {
             label: 'cancel',
             action() {
                 if (!currentProcess.isActive) {
-                    model.statusMessage = 'nothing running';
+                    statusMessage = 'nothing running';
                     return;
                 }
 
-                model.statusMessage = '';
+                statusMessage = '';
                 currentProcess.cancel();
                 currentProcess = null;
             },

@@ -196,6 +196,7 @@ async function fakeGoCommand() {
          );
         console.log();
 
+        console.log('quit', quit);
         console.log('status', (model.currentlyRunning ? 'running' : 'idle'));
         console.log('%c' + model.statusMessage, 'color: red');
         console.log();
@@ -205,6 +206,21 @@ async function fakeGoCommand() {
             console.log(`[${cmdKey}] ${cmd.label}`);
         }
     }
+
+    function Process() {
+        this.countdown = 3;
+        this.intervalID = setInterval(() => {
+            this.countdown--;
+            if (this.countdown <= 0) {
+                this.cancel();
+            }
+            this.onTick?.();
+        }, 500);
+    }
+    Process.prototype.cancel = function() {
+        clearInterval(this.intervalID);
+        this.onFinish?.();
+    };
 
     const cmdSwitch = n => ({
         label: 'Switch to loop #' + (n + 1),
@@ -232,10 +248,14 @@ async function fakeGoCommand() {
                     return;
                 }
 
-                model.currentlyRunning = {
-                    cancel() {
-                        model.statusMessage = 'canceled!';
-                    }
+                model.currentlyRunning = new Process();
+                model.currentlyRunning.onTick = function() {
+                    model.statusMessage = `got countdown = ${this.countdown}`;
+                    redraw();
+                };
+                model.currentlyRunning.onFinish = function() {
+                    model.currentlyRunning = null;
+                    redraw();
                 };
             },
         },
@@ -267,6 +287,8 @@ async function fakeGoCommand() {
         } while(cmd === undefined);
         cmd.action();
     }
+
+    model.currentlyRunning?.cancel();
 }
 
 async function getHEAD() {

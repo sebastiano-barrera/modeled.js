@@ -172,7 +172,7 @@ async function fakeGoCommand() {
             new Loop("full"),
         ],
 
-        currentlyRunning: null,
+        currentProcess: null,
 
         statusMessage: '',
     };
@@ -196,9 +196,20 @@ async function fakeGoCommand() {
          );
         console.log();
 
-        console.log('quit', quit);
-        console.log('status', (model.currentlyRunning ? 'running' : 'idle'));
+        console.log('status', (model.currentProcess ? 'running' : 'idle'));
         console.log('%c' + model.statusMessage, 'color: red');
+        console.log();
+
+        if (model.summary) {
+            for (const key in model.summary) {
+                const count = model.summary[key];
+                console.log(
+                    key.padEnd(10, '.') + String(count).padStart(4, '.'),
+                    '| ',
+                    '*'.repeat(count),
+                );
+            }
+        }
         console.log();
 
         for (const cmdKey in commands) {
@@ -208,16 +219,30 @@ async function fakeGoCommand() {
     }
 
     function Process() {
-        this.countdown = 3;
+        this.count = 200;
+        this.intervalID = null;
+    }
+    Process.prototype.start = function() {
+        if (this.intervalID !== null) return;
         this.intervalID = setInterval(() => {
-            this.countdown--;
-            if (this.countdown <= 0) {
+            this.count--;
+            if (this.count <= 0) {
                 this.cancel();
+                return;
             }
-            this.onTick?.();
-        }, 500);
+
+            if (this.onMessage === undefined) return;
+            const dice = Math.random();
+            let msg;
+            if (dice < 0.3) { msg = { outcome: 'failure' }; }
+            else if (dice < 0.6) { msg = { outcome: 'skipped' }; }
+            else { msg = { outcome: 'success' }; }
+
+            this.onMessage(msg);
+        }, 100);
     }
     Process.prototype.cancel = function() {
+        if (this.intervalID === null) return;
         clearInterval(this.intervalID);
         this.onFinish?.();
     };
@@ -243,33 +268,37 @@ async function fakeGoCommand() {
         s: {
             label: 'start',
             action() {
-                if (model.currentlyRunning !== null) {
+                if (model.currentProcess !== null) {
                     model.statusMessage = 'currently running!';
                     return;
                 }
 
-                model.currentlyRunning = new Process();
-                model.currentlyRunning.onTick = function() {
-                    model.statusMessage = `got countdown = ${this.countdown}`;
+                model.summary = null;
+                model.currentProcess = new Process();
+                model.currentProcess.onMessage = function(message) {
+                    model.summary ??= {};
+                    model.summary[message.outcome] ??= 0;
+                    model.summary[message.outcome]++;
                     redraw();
                 };
-                model.currentlyRunning.onFinish = function() {
-                    model.currentlyRunning = null;
+                model.currentProcess.onFinish = function() {
+                    model.currentProcess = null;
                     redraw();
                 };
+                model.currentProcess.start();
             },
         },
 
         c: {
             label: 'cancel',
             action() {
-                if (model.currentlyRunning === null) {
+                if (model.currentProcess === null) {
                     model.statusMessage = 'nothing running';
                     return;
                 }
 
-                model.currentlyRunning.cancel();
-                model.currentlyRunning = null;
+                model.currentProcess.cancel();
+                model.currentProcess = null;
             },
         },
         
@@ -288,7 +317,7 @@ async function fakeGoCommand() {
         cmd.action();
     }
 
-    model.currentlyRunning?.cancel();
+    model.currentProcess?.cancel();
 }
 
 async function getHEAD() {

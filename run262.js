@@ -87,43 +87,48 @@ async function cmdSingle() {
   }
 }
 
-async function cmdManager() {
-  const WORKER_COUNT = 4;
-
-  const output = [];
-
+async function fanout(workerCount, handlers) {
   const children = [];
-  for (let i = 0; i < WORKER_COUNT; i++) {
-    const tag = String(i).padEnd(4);
-
-    children.push(spawnWorker(i, WORKER_COUNT, {
-      onStderrLine: (line) => {
-        console.log(`worker ${tag} ! ${line}`);
-      },
-
-      onMessage: (message) => {
-        console.log(
-          `worker ${message.workerIndex} | ${message.type} ${message.testcase}`,
-        );
-        if (message.type !== "started") {
-          output.push(message);
-        }
-      },
+  for (let i = 0; i < workerCount; i++) {
+    children.push(spawnWorker(i, workerCount, {
+      onStderrLine() { handlers?.onStderrLine?.(i, ...arguments); },
+      onMessage() { handlers?.onMessage?.(i, ...arguments); },
     }));
   }
 
-  if (children.length !== WORKER_COUNT) throw new AssertionError();
+  if (children.length !== workerCount) throw new AssertionError();
 
   let allOk = true;
-  for (let i = 0; i < WORKER_COUNT; i++) {
+  for (let i = 0; i < workerCount; i++) {
     console.log(`waiting child ${i}...`);
     const status = await children[i].status;
     console.log(`child ${i} finished with status ${status.code}`);
     allOk = allOk && status.success;
   }
 
-  if (!allOk) Deno.exit(1);
+  return allOk;
+}
 
+async function cmdManager() {
+  const WORKER_COUNT = 4;
+
+  const output = [];
+  const onStderrLine = (tag, line) => {
+    console.log(`worker ${tag} ! ${line}`);
+  };
+  const onMessage = (tag, message) => {
+    console.log(
+      `worker ${message.workerIndex} | ${message.type} ${message.testcase}`,
+    );
+    if (message.type !== "started") {
+      output.push(message);
+    }
+  };
+
+
+  const allOk = await fanout(WORKER_COUNT, {onStderrLine, onMessage});
+  if (!allOk) Deno.exit(1);
+   
   const successes = [];
   const skips = [];
   const failures = [];

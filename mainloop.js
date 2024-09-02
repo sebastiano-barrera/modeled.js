@@ -202,7 +202,6 @@ async function goCommand() {
         }
     };
     currentProcess.onFinish = function() { 
-        currentOutput.reset();
         redraw();
     };
 

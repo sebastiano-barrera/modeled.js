@@ -120,6 +120,30 @@ class Debouncer {
     }
 }
 
+class TestOutput {
+    static VALID_OUTCOMES = {
+        success: true,
+        failure: true,
+        skipped: true,
+    };
+
+    constructor() {
+        this.summary = {};
+        this.reset();
+    }
+
+    reset() {
+        for (const outcome in this.VALID_OUTCOMES) {
+            this.summary[outcome] = 0;
+        }
+    }
+
+    addMessage(msg) {
+        this.summary[msg.outcome]++;
+    }
+}
+
+
 const branchName = await getCurrentBranchName();
 const branchLength = await getBranchLength();
 
@@ -167,24 +191,20 @@ async function goCommand() {
         new Loop("full"),
     ];
     let statusMessage = '';
-    let summary = {
-        reset() {
-            this.success = 0;
-            this.failure = 0;
-            this.skipped = 0;
-        }
-    };
-    summary.reset();
+    let currentOutput = new TestOutput();
 
     const currentProcess = new Process();
     const redrawDbnc = new Debouncer(100);
     currentProcess.onMessage = function(message) {
-        summary[message.outcome]++;
+        currentOutput.addMessage(message);
         if (redrawDbnc.tick()) {
             redraw();
         }
     };
-    currentProcess.onFinish = function() { redraw(); };
+    currentProcess.onFinish = function() { 
+        currentOutput.reset();
+        redraw();
+    };
 
     Deno.stdin.setRaw(true, {cbreak: true});
     const keybuf = new Uint8Array(1);
@@ -205,8 +225,8 @@ async function goCommand() {
         console.log(`${statusStr} %c${statusMessage}`, 'color: red');
         console.log();
 
-        for (const key of ['success', 'failure', 'skipped']) {
-            const count = summary[key];
+        for (const key in TestOutput.VALID_OUTCOMES) {
+            const count = currentOutput.summary[key] ?? 0;
             console.log(
                 key.padEnd(10, '.') + String(count).padStart(4, '.'),
                 '| ',
@@ -282,8 +302,6 @@ async function goCommand() {
 
     currentProcess.cancel();
 }
-
-
 
 async function getHEAD() {
     return await runCommand([

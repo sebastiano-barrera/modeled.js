@@ -196,7 +196,6 @@ async function goCommand() {
     const currentProcess = new Process();
     const redrawDbnc = new Debouncer(100);
     currentProcess.onMessage = function(message) {
-        statusMessage = message.outcome;
         currentOutput.addMessage(message);
         if (redrawDbnc.tick()) {
             redraw();
@@ -227,7 +226,8 @@ async function goCommand() {
         console.log();
 
         for (const key in TestOutput.VALID_OUTCOMES) {
-            const count = currentOutput.summary[key] ?? 0;
+            const count = currentOutput.summary[key];
+            if (count === undefined) continue;
             console.log(
                 key.padEnd(10, '.') + String(count).padStart(4, '.'),
                 '| ',

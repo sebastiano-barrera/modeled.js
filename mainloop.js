@@ -196,6 +196,7 @@ async function goCommand() {
     const currentProcess = new Process();
     const redrawDbnc = new Debouncer(100);
     currentProcess.onMessage = function(message) {
+        statusMessage = message.outcome;
         currentOutput.addMessage(message);
         if (redrawDbnc.tick()) {
             redraw();

@@ -133,8 +133,7 @@ class TestOutput {
     }
 
     reset() {
-        this.summary.success = 0;
-        for (const outcome in this.VALID_OUTCOMES) {
+        for (const outcome in TestOutput.VALID_OUTCOMES) {
             this.summary[outcome] = 0;
         }
     }

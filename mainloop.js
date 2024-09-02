@@ -266,7 +266,7 @@ async function goCommand() {
 
                 await ensureFilesCommitted();
 
-                summary.reset();
+                currentOutput.reset();
                 statusMessage = '';
                 currentProcess.start();
             },

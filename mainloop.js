@@ -237,12 +237,13 @@ async function goCommand() {
 
 
         for (const key in TestOutput.VALID_OUTCOMES) {
-            const count = progress[key];
+            const width = progress[key];
+            const count = currentOutput.summary[key];
             if (count === undefined) continue;
             console.log(
                 key.padEnd(10, '.') + String(count).padStart(4, '.'),
                 '| ',
-                '*'.repeat(count),
+                '*'.repeat(width),
             );
         }
         console.log();

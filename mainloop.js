@@ -226,8 +226,18 @@ async function goCommand() {
         console.log(`${statusStr} %c${statusMessage}`, 'color: red');
         console.log();
 
+        let progressMax = 0;
+        for (const [key, count] in Object.entries(TestOutput.VALID_OUTCOMES)) {
+            if (count > progressMax) progressMax = count;
+        }
+        let progress = {};
+        for (const [key, count] in Object.entries(TestOutput.VALID_OUTCOMES)) {
+            progress[key] = Math.floor(count * 60 / progress);
+        }
+
+
         for (const key in TestOutput.VALID_OUTCOMES) {
-            const count = currentOutput.summary[key];
+            const count = progress[key];
             if (count === undefined) continue;
             console.log(
                 key.padEnd(10, '.') + String(count).padStart(4, '.'),

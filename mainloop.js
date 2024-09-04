@@ -49,8 +49,9 @@ async function runCommand(args) {
 }
 
 class Process {
-    constructor() {
+    constructor(initConfigPath) {
         this.child = null;
+        this.configPath = initConfigPath;
     }
 
     start() {
@@ -67,7 +68,7 @@ class Process {
                 "run", "--allow-read", "--allow-run",
                 `${here}/run262.js`,
                 "--test262", test262Path,
-                "--config", configPath,
+                "--config", this.configPath,
                 "--fanout", "4",
             ],
             stdout: "piped",
@@ -154,9 +155,8 @@ const args = parseArgs(Deno.args, {
 });
 
 const test262Path = args.test262;
-const configPath = args.config;
 
-if (!test262Path || !configPath) {
+if (!test262Path) {
     console.log(
         "Usage: deno run script.js [go|squash] --test262 <path> --config <path>",
     );
@@ -165,7 +165,7 @@ if (!test262Path || !configPath) {
 
 switch (args._[0]) {
     case "go":
-        await goCommand(test262Path, configPath);
+        await goCommand(test262Path);
         break;
     case "squash":
         await squashCommand();
@@ -183,6 +183,8 @@ async function goCommand() {
     function Loop(name) {
         this.name = name;
         this.skipsCount = 0;
+        const here = dirname(import.meta.url);
+        this.configPath = `${here}/test/${name}.json`;
     }
 
     let currentLoopIndex = 0;
@@ -193,7 +195,7 @@ async function goCommand() {
     let statusMessage = '';
     let currentOutput = new TestOutput();
 
-    const currentProcess = new Process();
+    const currentProcess = new Process(loops[currentLoopIndex].configPath);
     const redrawDbnc = new Debouncer(100);
     currentProcess.onMessage = function(message) {
         currentOutput.addMessage(message);
@@ -268,6 +270,7 @@ async function goCommand() {
 
                 currentOutput.reset();
                 statusMessage = '';
+                currentProcess.configPath = loops[currentLoopIndex].configPath;
                 currentProcess.start();
             },
         },

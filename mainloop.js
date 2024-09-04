@@ -227,11 +227,11 @@ async function goCommand() {
         console.log();
 
         let progressMax = 0;
-        for (const [key, count] in Object.entries(TestOutput.VALID_OUTCOMES)) {
+        for (const [key, count] of Object.entries(TestOutput.VALID_OUTCOMES)) {
             if (count > progressMax) progressMax = count;
         }
         let progress = {};
-        for (const [key, count] in Object.entries(TestOutput.VALID_OUTCOMES)) {
+        for (const [key, count] of Object.entries(TestOutput.VALID_OUTCOMES)) {
             progress[key] = Math.floor(count * 60 / progress);
         }
 

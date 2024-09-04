@@ -68,7 +68,7 @@ class Process {
                 "run", "--allow-read", "--allow-run",
                 `${here}/run262.js`,
                 "--test262", test262Path,
-                "--config", this.configPath,
+                "--config", this.configPath.slice('file://'.length),
                 "--fanout", "4",
             ],
             stdout: "piped",

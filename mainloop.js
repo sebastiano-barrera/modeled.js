@@ -232,7 +232,7 @@ async function goCommand() {
         }
         let progress = {};
         for (const [key, count] of Object.entries(TestOutput.VALID_OUTCOMES)) {
-            progress[key] = Math.floor(count * 60 / progress);
+            progress[key] = Math.floor(count * 60 / progressMax);
         }
 
 

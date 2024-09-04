@@ -269,8 +269,8 @@ async function goCommand() {
                 await ensureFilesCommitted();
 
                 currentOutput.reset();
-                statusMessage = '';
                 currentProcess.configPath = loops[currentLoopIndex].configPath;
+                statusMessage = `loading ${currentProcess.configPath}`;
                 currentProcess.start();
             },
         },

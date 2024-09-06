@@ -130,6 +130,7 @@ class TestOutput {
 
     constructor() {
         this.summary = {};
+        this.allMessages = [];
         this.reset();
     }
 
@@ -137,6 +138,7 @@ class TestOutput {
         for (const outcome in TestOutput.VALID_OUTCOMES) {
             this.summary[outcome] = 0;
         }
+        this.allMessages.length = 0;
     }
 
     addMessage(msg) {
@@ -211,7 +213,7 @@ async function goCommand() {
         const writer = outputFile.writable.getWriter();
         try{
             const encoder = new TextEncoder();
-            for (const message of currentOutput) {
+            for (const message of currentOutput.allMessages) {
                 writer.write(encoder.encode(JSON.stringify(message) + '\n'));
             }
         } finally {

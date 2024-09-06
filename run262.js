@@ -76,7 +76,17 @@ async function cmdSingle() {
       const l = item.loc;
       return `${l.source}:${l.start.line}-${l.end.line}:${l.start.column}-${l.end.column} ${item.type}`;
     }) ?? [];
-    outcome.stack = outcome.error?.stack?.split("\n");
+
+    
+    let causeIndex = 0;
+    if (outcome.error) {
+      outcome.stack = [];
+      for (let error = outcome.error; error; error = error.cause) {
+        outcome.stack.push(`cause ${causeIndex}`);
+        outcome.stack.push(...  error.stack.split("\n"));
+        causeIndex++;
+      }
+    }
 
     for (const key of Object.keys(outcome).sort()) {
       if (key === "outcome") continue;

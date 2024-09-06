@@ -143,6 +143,7 @@ class TestOutput {
 
     addMessage(msg) {
         this.summary[msg.outcome]++;
+        this.allMessages.push(msg);
     }
 }
 

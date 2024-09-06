@@ -207,7 +207,7 @@ async function goCommand() {
         redraw();
 
         const commitID = await getHEAD();
-        const outputFile = await Deno.createFile(`results-${commitID}.txt`);
+        const outputFile = await Deno.create(`results-${commitID}.txt`);
         const writer = outputFile.writable.getWriter();
         try{
             const encoder = new TextEncoder();

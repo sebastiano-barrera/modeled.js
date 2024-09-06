@@ -6,12 +6,93 @@ import { TextLineStream } from "https://deno.land/std@0.224.0/streams/mod.ts";
 import { AssertionError } from "https://deno.land/std@0.224.0/assert/assertion_error.ts";
 
 const WORKER_OUTPUT_PREFIX = "worker output:";
+const DATA_DIR = `${import.meta.dirname}/.run262`;
+const STATE_FILENAME = `${DATA_DIR}/state`;
 
 class CliError extends Error {}
 
 class SkippedTest {
   constructor(message) {
     this.message = message;
+  }
+}
+
+function assertValidCommitID(commitID) {
+  if (!/^[a-f0-9]+$/.test(commitID)) {
+    throw new Error(`invalid output for git command: git rev-parse ${commitID}: ${stdout}`);
+  }
+}
+
+async function resolveGitRevision(rev) {
+  const command = new Deno.Command("git", {
+    args: ["rev-parse", rev],
+    stdout: "piped",
+    stderr: "piped",
+  });
+  const { code, stdout, stderr } = await command.output();
+
+  if (code !== 0) return null;
+
+  const anchorCommitID = new TextDecoder().decode(stdout).trim();
+  assertValidCommitID(anchorCommitID);
+  return anchorCommitID;
+}
+async function getAnchorCommitID() { return await resolveGitRevision('run262-anchor') }
+async function getCurrentCommitID() {
+  // is repo clean?
+  const command = new Deno.Command("git", {
+    args: ["status", "--porcelain"],
+    stdout: "piped",
+    stderr: "piped",
+  });
+  const { code, stdout, stderr } = await command.output();
+
+  if (code !== 0) {
+    throw new Error('git error: ' + new TextDecoder().decode(stderr));
+  }
+
+  if (stdout.length !== 0) {
+    // repo not clean, no clear-cut commit ID can be assigned to the current situation
+    return null;
+  }
+
+  return await resolveGitRevision('HEAD');
+}
+
+let state = null;
+
+async function loadState() {
+  try {
+    state = await Deno.readTextFile();
+  } catch(err) {
+    if (err instanceof Deno.errors.NotFound) {
+      return null;
+    }
+    throw err;
+  }
+}
+async function saveState() {
+  Deno.writeTextFile(STATE_FILENAME, JSON.stringify(state, null, 2));
+}
+async function saveOutput(commitID, outcomes) {
+  assertValidCommitID(commitID);
+  const content = JSON.stringify({outcomes});
+  const filename = `${DATA_DIR}/output-${commitID}.json`;
+  await Deno.writeTextFile(filename, content);
+  console.log(`saved status to file ${filename}`);
+}
+async function loadOutput(commitID) {
+  assertValidCommitID(commitID);
+  const filename = `${DATA_DIR}/output-${commitID}.json`;
+  try {
+    const content = await Deno.readTextFile(filename);
+    const object = JSON.parse(content);
+    return object.outcomes;
+  } catch(err) {
+    if (err instanceof Deno.errors.NotFound) {
+      return null;
+    }
+    throw err;
   }
 }
 
@@ -49,7 +130,12 @@ const preamble = {
   assert: await Deno.readTextFile(`${test262Root}/harness/assert.js`),
 };
 
-if (args.single) {
+if (args.testAnchor) {
+  const anchorCommitID = await getAnchorCommitID();
+  console.log('anchor =', anchorCommitID);
+  Deno.exit(0);
+
+} else if (args.single) {
   await cmdSingle();
 } else if (args.worker) {
   const toks = args.worker.split("/");
@@ -162,6 +248,16 @@ async function cmdManager() {
 
   const output = outputRaw.map(JSON.parse);
 
+  const currentCommitID = await getCurrentCommitID();
+  const anchorCommitID = await getAnchorCommitID();
+  const anchorOutput = await loadOutput(anchorCommitID);
+  let anchorOutcomeOfTestcase = {};
+  if (anchorOutput) {
+    for (const oc of anchorOutput) {
+      anchorOutcomeOfTestcase[oc.testcase] = oc;
+    }
+  }
+
   const successes = [];
   const skips = [];
   const failures = [];
@@ -171,14 +267,34 @@ async function cmdManager() {
     else failures.push(oc);
   }
 
+  const colorOfOutcome = {
+    success: 'green',
+    skipped: 'yellow',
+    failure: 'red',
+  };
+
   console.log(`${successes.length} successes:`);
   for (const oc of successes) {
-    console.log(`%c - ${oc.testcase}`, "color: green");
+    const anchor = anchorOutcomeOfTestcase[oc.testcase];
+    const anchorOutcome = ((anchor?.outcome ?? ' ?') + ' ->').padEnd(10);
+    const anchorColor = colorOfOutcome[anchor?.outcome] ?? 'white';
+    console.log(
+      ` - %c[${anchorOutcome}] %c${oc.testcase}`, 
+      `color: ${anchorColor}`,
+      "color: green"
+    );
   }
 
   console.log(`${skips.length} skipped:`);
   for (const { testcase, error } of skips) {
-    console.log(`%c - ${testcase}: ${error.message}`, "color: yellow");
+    const anchor = anchorOutcomeOfTestcase[testcase];
+    const anchorOutcome = ((anchor?.outcome ?? ' ?') + ' ->').padEnd(10);
+    const anchorColor = colorOfOutcome[anchor?.outcome] ?? 'white';
+    console.log(
+      ` - %c[${anchorOutcome}] %c${testcase}: ${error.message}`,
+      `color: ${anchorColor}`,
+      "color: yellow"
+    );
   }
 
   if (failures.length === 0) {
@@ -188,6 +304,11 @@ async function cmdManager() {
     console.log(`${failures.length} failures:`);
     for (const oc of failures) {
       console.log(`%ccase\t${oc.testcase}`, "color: red");
+
+      const anchor = anchorOutcomeOfTestcase[oc.testcase];
+      const anchorOutcome = anchor?.outcome ?? ' ?';
+      const anchorColor = colorOfOutcome[anchor?.outcome] ?? 'white';
+      console.log(`was\t%c${anchorOutcome}`, `color: ${anchorColor}`);
 
       const lines = oc.error.toString().split("\n");
       for (let i = 0; i < lines.length; i++) {
@@ -203,6 +324,13 @@ async function cmdManager() {
     "color: yellow",
     "color: red",
   );
+
+  Deno.mkdir(DATA_DIR, { recursive: true });
+  if (currentCommitID) {
+    saveOutput(currentCommitID, output);
+  } else {
+    console.log('repo dirty, not saving');``
+  }
 }
 
 async function cmdWorker(workerIndex, workerCount) {

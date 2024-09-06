@@ -203,8 +203,20 @@ async function goCommand() {
             redraw();
         }
     };
-    currentProcess.onFinish = function() { 
+    currentProcess.onFinish = async function() { 
         redraw();
+
+        const commitID = await getHEAD();
+        const outputFile = await Deno.createFile(`results-${commitID}.txt`);
+        const writer = outputFile.writable.getWriter();
+        try{
+            const encoder = new TextEncoder();
+            for (const message of currentOutput) {
+                writer.write(encoder.encode(JSON.stringify(message) + '\n'));
+            }
+        } finally {
+            await writer.close();
+        }
     };
 
     Deno.stdin.setRaw(true, {cbreak: true});

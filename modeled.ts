@@ -997,7 +997,7 @@ export class VM {
 			_CV = this;
 
 			const ast = acorn.parse(text, {
-				ecmaVersion: "latest",
+				ecmaVersion: 2024,
 				sourceFile: path,
 				locations: true,
 			});
@@ -1009,10 +1009,7 @@ export class VM {
 
 			// acorn throws a builtin SyntaxError; we convert it into a guest SyntaxError
 			if (error instanceof SyntaxError) {
-				error = this.makeError(
-					"SyntaxError",
-					error.message,
-				);
+				error = this.makeError("SyntaxError", error.message, error);
 			}
 
 			assert(
@@ -1099,7 +1096,7 @@ export class VM {
 		let ast: acorn.Program & Node;
 		try {
 			ast = acorn.parse(text, {
-				ecmaVersion: "latest",
+				ecmaVersion: 2024,
 				directSourceFile: text,
 				locations: true,
 			});
@@ -2679,6 +2676,9 @@ export class VM {
 			}
 		} else if (targetExpr.type === "Identifier") {
 			const name = targetExpr.name;
+			if (this.currentScope.isStrict() && (name === 'eval' || name === 'arguments')) {
+				return this.throwError("SyntaxError", "forbidden identifier in strict mode: " + name);
+			}
 			this.setVar(name, value);
 		} else {
 			throw new AssertionError(
@@ -3999,19 +3999,41 @@ function initGlobalObject(G: VMObject): void {
 	const consFunction = nativeVMFunc((vm, _subject, args) => {
 		// even when invoked as `new Function(...)`, discard this, return another object
 
-		if (args.length === 0 || args[0].type !== "string") {
-			return vm.throwTypeError(
-				"new Function() must be invoked with function's body as text (string)",
-			);
+		if (args.length === 0) {
+			throw new VMError('not yet implemented: new Function() called without arguments');
 		}
 
-		const text = args[0].value;
-		const ast = acorn.parse(text, {
-			ecmaVersion: "latest",
-			allowReturnOutsideFunction: true,
-			directSourceFile: text,
-			locations: true,
-		});
+		for (let i=0; i < args.length; i++) {
+			if (args[i].type !== 'string') {
+				return vm.throwError("TypeError", `argument[${i}] is not a string`);
+			}
+		}
+
+		const paramNodes = [];
+		for (let i=0; i < args.length - 1; i++) {
+			const argStr = args[i].value.trim();
+			if (argStr === '') continue;
+			const paramNode = acorn.parseExpressionAt(argStr, 0, { ecmaVersion: 2024 });
+			paramNodes.push(paramNode);
+		}
+
+		const text = args[args.length - 1].value;
+		let ast;
+		try {
+			ast = acorn.parse(text, {
+				ecmaVersion: 2024,
+				allowReturnOutsideFunction: true,
+				directSourceFile: text,
+				locations: true,
+			});
+		} catch(error) {
+			// acorn throws a builtin SyntaxError; we convert it into a guest SyntaxError
+			if (error instanceof SyntaxError) {
+				error = vm.makeError("SyntaxError", error.message, error);
+			}
+			throw error;
+		}
+
 		const body: acorn.Statement[] = ast.body.map((item) => {
 			assert(
 				item.type !== "ImportDeclaration" &&
@@ -4027,7 +4049,7 @@ function initGlobalObject(G: VMObject): void {
 			body,
 			type: "BlockStatement",
 		};
-		return vm.makeFunction([], blockStmt, {
+		return vm.makeFunction(paramNodes, blockStmt, {
 			scopeStrictnessIrrelevant: true,
 		});
 	}, { isConstructor: true });

@@ -130,12 +130,7 @@ const preamble = {
   assert: await Deno.readTextFile(`${test262Root}/harness/assert.js`),
 };
 
-if (args.testAnchor) {
-  const anchorCommitID = await getAnchorCommitID();
-  console.log('anchor =', anchorCommitID);
-  Deno.exit(0);
-
-} else if (args.single) {
+if (args.single) {
   await cmdSingle();
 } else if (args.worker) {
   const toks = args.worker.split("/");
@@ -185,19 +180,17 @@ async function cmdSingle() {
   }
 }
 
-async function cmdManager() {
-  const WORKER_COUNT = 4;
-
+async function fanout(workerCount) {
   const outputRaw = [];
 
   const children = [];
-  for (let i = 0; i < WORKER_COUNT; i++) {
+  for (let i = 0; i < workerCount; i++) {
     const childArgs = [
       "run",
       "--allow-read",
       import.meta.filename,
       "--worker",
-      `${i}/${WORKER_COUNT}`,
+      `${i}/${workerCount}`,
     ].concat(Deno.args);
 
     const cmd = new Deno.Command(Deno.execPath(), {
@@ -234,21 +227,36 @@ async function cmdManager() {
     })();
   }
 
-  if (children.length !== WORKER_COUNT) throw new AssertionError();
+  if (children.length !== workerCount) throw new AssertionError();
 
   let allOk = true;
-  for (let i = 0; i < WORKER_COUNT; i++) {
+  for (let i = 0; i < workerCount; i++) {
     console.log(`waiting child ${i}...`);
     const status = await children[i].status;
     console.log(`child ${i} finished with status ${status.code}`);
     allOk = allOk && status.success;
   }
 
-  if (!allOk) Deno.exit(1);
+  if (!allOk) {
+    throw new Error('some workers did not complete successfully');
+  }
 
-  const output = outputRaw.map(JSON.parse);
+  return outputRaw.map(JSON.parse);
+}
+
+async function cmdManager() {
+  const WORKER_COUNT = 4;
 
   const currentCommitID = await getCurrentCommitID();
+
+  let output = null;
+  if (currentCommitID && !args.noCache) {
+    output = await loadOutput(currentCommitID);
+  }
+  if (output === null) {
+    output = await fanout(WORKER_COUNT);
+  }
+
   const anchorCommitID = await getAnchorCommitID();
   const anchorOutput = await loadOutput(anchorCommitID);
   let anchorOutcomeOfTestcase = {};

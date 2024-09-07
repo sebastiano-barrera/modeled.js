@@ -41,7 +41,7 @@ async function getAnchorCommitID() { return await resolveGitRevision('run262-anc
 async function getCurrentCommitID() {
   // is repo clean?
   const command = new Deno.Command("git", {
-    args: ["status", "--porcelain"],
+    args: ["status", "--porcelain", "--untracked-files=no"],
     stdout: "piped",
     stderr: "piped",
   });

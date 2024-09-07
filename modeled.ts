@@ -999,7 +999,7 @@ export class VM {
 			return inner();
 		} catch (e) {
 			if (e instanceof ExceptionRequest) {
-				return this.throwError(e.constructorName, e.message);
+				return this.throwError(e.constructorName, e.message, e);
 			}
 
 			if (typeof e === "object" && e.context === undefined) {

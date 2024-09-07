@@ -37,7 +37,11 @@ async function resolveGitRevision(rev) {
   assertValidCommitID(anchorCommitID);
   return anchorCommitID;
 }
-async function getAnchorCommitID() { return await resolveGitRevision('run262-anchor') }
+async function getAnchorCommitID() {
+  const ret = await resolveGitRevision('run262-anchor');
+  console.log("anchor commit ID = " + ret);
+  return ret;
+}
 async function getCurrentCommitID() {
   // is repo clean?
   const command = new Deno.Command("git", {
@@ -52,11 +56,15 @@ async function getCurrentCommitID() {
   }
 
   if (stdout.length !== 0) {
+    console.log("current commit ID: repo not clean!");
+    console.log("stdout: [" + (new TextDecoder().decode(stdout)) + "]");
     // repo not clean, no clear-cut commit ID can be assigned to the current situation
     return null;
   }
 
-  return await resolveGitRevision('HEAD');
+  const ret = await resolveGitRevision('HEAD');
+  console.log("current commit ID = " + ret);
+  return ret;
 }
 
 let state = null;

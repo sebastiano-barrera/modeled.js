@@ -365,7 +365,7 @@ async function cmdManager() {
     "color: red",
   );
   console.log(
-    `  delta: %c${delta.successes} fixed; %c${delta.skips} now skipped; %c${delta.failures} failures`,
+    `  delta: %c${delta.successes} fixed; %c${delta.skips} now skipped; %c${delta.failures} broken`,
     "color: green",
     "color: yellow",
     "color: red",

@@ -817,12 +817,17 @@ class EnvScope extends Scope {
 			);
 		}
 
-		this.env.defineProperty(name, {
-			value: { type: "undefined" },
-			configurable: false,
-			enumerable: true,
-			writable: true,
-		});
+		if (this.env.containsOwnProperty(name)) {
+			// redefinition is allowed
+			this.env.setProperty(name, { type: "undefined" });
+		} else {
+			this.env.defineProperty(name, {
+				value: { type: "undefined" },
+				configurable: false,
+				enumerable: true,
+				writable: true,
+			});
+		}
 	}
 	setVar(
 		name: string,

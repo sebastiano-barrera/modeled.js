@@ -491,7 +491,10 @@ abstract class VMInvokable extends VMObject {
 				// arguments MUST be already defined before we start evaluating
 				// default initializers, because one of these might try to redefine
 				// `arguments` within an eval expr...
-				vm.defineVar("arguments", { allowRedecl: true });
+				vm.defineVar("arguments", {
+					allowRedecl: true,
+					defaultValue: { type: "undefined" },
+				});
 
 				// not all subclasses have named params
 				if (this.params !== undefined) {
@@ -499,7 +502,10 @@ abstract class VMInvokable extends VMObject {
 					const definedParams = new Set<string>();
 					for (const name of this.params) {
 						if (definedParams.has(name)) continue;
-						vm.defineVar(name, { allowRedecl: true });
+						vm.defineVar(name, {
+							allowRedecl: true,
+							defaultValue: { type: "undefined" },
+						});
 						vm.setDoNotDelete(name);
 						definedParams.add(name);
 					}
@@ -648,6 +654,7 @@ abstract class Scope {
 		name: string,
 		valueOrThunk: JSValue | (() => JSValue),
 		vm?: VM,
+		options?: SetOptions,
 	): void;
 	abstract lookupVar(
 		name: string,
@@ -674,6 +681,14 @@ interface DefineOptions {
 interface LookupOptions {
 	/** Do not extend lookup to parent scopes */
 	noParent?: boolean;
+}
+
+interface SetOptions {
+	/** `setVar` is being called to initialize a variable.
+	 *
+	 * Assignment to variables in TDZ is allowed only when this flag is true.
+	 */
+	initialize?: boolean;
 }
 
 class VarScope extends Scope {
@@ -720,14 +735,25 @@ class VarScope extends Scope {
 		name: string,
 		valueOrThunk: JSValue | (() => JSValue),
 		vm?: VM,
+		options?: SetOptions,
 	) {
 		assert(
 			vm instanceof VM,
 			"vm not passed (required to throw ReferenceError)",
 		);
-		if (this.vars.has(name)) this.vars.set(name, valueOrThunk);
-		else if (this.parent) this.parent.setVar(name, valueOrThunk, vm);
-		else if (this.isStrict()) {
+		const preValue = this.vars.get(name);
+		if (preValue !== undefined) {
+			if (preValue === "TDZ" && !options?.initialize) {
+				// console.log("asmt before init: " + name);
+				return vm.throwError(
+					"ReferenceError",
+					"variable assigned before initialization",
+				);
+			}
+			this.vars.set(name, valueOrThunk);
+		} else if (this.parent) {
+			this.parent.setVar(name, valueOrThunk, vm, options);
+		} else if (this.isStrict()) {
 			return vm.throwError("NameError", "unbound variable: " + name);
 		}
 	}
@@ -854,8 +880,9 @@ class EnvVarScope extends Scope {
 		name: string,
 		valueOrThunk: JSValue | (() => JSValue),
 		vm?: VM,
+		options?: SetOptions,
 	): void {
-		return this.var.setVar(name, valueOrThunk, vm);
+		return this.var.setVar(name, valueOrThunk, vm, options);
 	}
 	override lookupVar(name: string): JSValue | "TDZ" | undefined {
 		return this.var.lookupVar(name);
@@ -1211,8 +1238,10 @@ export class VM {
 					if (stmt.type === "Program") {
 						scope = new EnvVarScope(this.globalObj);
 						scope.this = this.globalObj;
-						scope.defineVar("globalThis", { allowRedecl: true });
-						scope.setVar("globalThis", this.globalObj, this);
+						scope.defineVar("globalThis", {
+							allowRedecl: true,
+							defaultValue: this.globalObj,
+						});
 						if (
 							stmt.body.length > 0 &&
 							stmt.body[0].type === "ExpressionStatement" &&
@@ -1341,7 +1370,9 @@ export class VM {
 
 							// `defineVar` for this name must have already been done by hoistDeclarations
 							// and #run-functionDefs
-							this.setVar(name, value);
+							this.currentScope!.setVar(name, value, this, {
+								initialize: true,
+							});
 
 							if (stmt.declarations.length === 1) {
 								this.completionValue = value;
@@ -2676,8 +2707,14 @@ export class VM {
 			}
 		} else if (targetExpr.type === "Identifier") {
 			const name = targetExpr.name;
-			if (this.currentScope.isStrict() && (name === 'eval' || name === 'arguments')) {
-				return this.throwError("SyntaxError", "forbidden identifier in strict mode: " + name);
+			if (
+				this.currentScope.isStrict() &&
+				(name === "eval" || name === "arguments")
+			) {
+				return this.throwError(
+					"SyntaxError",
+					"forbidden identifier in strict mode: " + name,
+				);
 			}
 			this.setVar(name, value);
 		} else {
@@ -4000,20 +4037,24 @@ function initGlobalObject(G: VMObject): void {
 		// even when invoked as `new Function(...)`, discard this, return another object
 
 		if (args.length === 0) {
-			throw new VMError('not yet implemented: new Function() called without arguments');
+			throw new VMError(
+				"not yet implemented: new Function() called without arguments",
+			);
 		}
 
-		for (let i=0; i < args.length; i++) {
-			if (args[i].type !== 'string') {
+		for (let i = 0; i < args.length; i++) {
+			if (args[i].type !== "string") {
 				return vm.throwError("TypeError", `argument[${i}] is not a string`);
 			}
 		}
 
 		const paramNodes = [];
-		for (let i=0; i < args.length - 1; i++) {
+		for (let i = 0; i < args.length - 1; i++) {
 			const argStr = args[i].value.trim();
-			if (argStr === '') continue;
-			const paramNode = acorn.parseExpressionAt(argStr, 0, { ecmaVersion: 2024 });
+			if (argStr === "") continue;
+			const paramNode = acorn.parseExpressionAt(argStr, 0, {
+				ecmaVersion: 2024,
+			});
 			paramNodes.push(paramNode);
 		}
 
@@ -4026,7 +4067,7 @@ function initGlobalObject(G: VMObject): void {
 				directSourceFile: text,
 				locations: true,
 			});
-		} catch(error) {
+		} catch (error) {
 			// acorn throws a builtin SyntaxError; we convert it into a guest SyntaxError
 			if (error instanceof SyntaxError) {
 				error = vm.makeError("SyntaxError", error.message, error);
@@ -4272,6 +4313,8 @@ function hoistDeclarations(node: Node) {
 					defineOptions: {
 						allowRedecl: true,
 						allowAsGlobalObjectProperty: true,
+						// no TDZ for these
+						defaultValue: { type: "undefined" },
 					},
 				});
 			}

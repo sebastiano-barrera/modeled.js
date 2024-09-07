@@ -269,6 +269,12 @@ async function cmdManager() {
   const successes = [];
   const skips = [];
   const failures = [];
+  const delta = {
+    successes: 0,
+    skips: 0,
+    failures: 0,
+  };
+
   for (const oc of output) {
     if (oc.outcome === "success") successes.push(oc);
     else if (oc.outcome === "skipped") skips.push(oc);
@@ -303,6 +309,8 @@ async function cmdManager() {
       `${anchorStyle}`,
       "color: green"
     );
+
+    if (anchor?.outcome !== 'success') delta.successes += 1;
   }
 
   console.log(`${skips.length} skipped:`);
@@ -315,6 +323,8 @@ async function cmdManager() {
       `${anchorStyle}`,
       "color: yellow"
     );
+
+    if (anchor?.outcome !== 'skipped') delta.skips += 1;
   }
 
   if (failures.length === 0) {
@@ -335,11 +345,19 @@ async function cmdManager() {
         const tag = i == 0 ? "error" : "ectx";
         console.log(`${tag}\t${lines[i]}`);
       }
+
+      if (anchor?.outcome !== 'failure') delta.failures += 1;
     }
   }
 
   console.log(
     `summary: %c${successes.length} successes; %c${skips.length} skipped; %c${failures.length} failures`,
+    "color: green",
+    "color: yellow",
+    "color: red",
+  );
+  console.log(
+    `  delta: %c${delta.successes} fixed; %c${delta.skips} now skipped; %c${delta.failures} failures`,
     "color: green",
     "color: yellow",
     "color: red",

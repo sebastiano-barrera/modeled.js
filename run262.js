@@ -275,20 +275,32 @@ async function cmdManager() {
     else failures.push(oc);
   }
 
-  const colorOfOutcome = {
-    success: 'green',
-    skipped: 'yellow',
-    failure: 'red',
-  };
+  function styleOfOutcome(previous, current) {
+    if (previous === current) {
+      switch(previous) {
+      case "success": return 'color: green';
+      case "skipped": return 'color: yellow';
+      case "failure": return 'color: red';
+      default: return "";
+      }
+    } else {
+      switch(previous) {
+      case "success": return 'background-color: green; color: white; font-weight: bold';
+      case "skipped": return 'background-color: yellow; color: black; font-weight: bold';
+      case "failure": return 'background-color: red; color: white; font-weight: bold';
+      default: return "";
+      }
+    }
+  }
 
   console.log(`${successes.length} successes:`);
   for (const oc of successes) {
     const anchor = anchorOutcomeOfTestcase[oc.testcase];
     const anchorOutcome = ((anchor?.outcome ?? ' ?') + ' ->').padEnd(10);
-    const anchorColor = colorOfOutcome[anchor?.outcome] ?? 'white';
+    const anchorStyle = styleOfOutcome(anchor?.outcome, 'success');
     console.log(
       ` - %c[${anchorOutcome}] %c${oc.testcase}`, 
-      `color: ${anchorColor}`,
+      `${anchorStyle}`,
       "color: green"
     );
   }
@@ -297,10 +309,10 @@ async function cmdManager() {
   for (const { testcase, error } of skips) {
     const anchor = anchorOutcomeOfTestcase[testcase];
     const anchorOutcome = ((anchor?.outcome ?? ' ?') + ' ->').padEnd(10);
-    const anchorColor = colorOfOutcome[anchor?.outcome] ?? 'white';
+    const anchorStyle = styleOfOutcome(anchor?.outcome, 'skipped');
     console.log(
       ` - %c[${anchorOutcome}] %c${testcase}: ${error.message}`,
-      `color: ${anchorColor}`,
+      `${anchorStyle}`,
       "color: yellow"
     );
   }
@@ -315,8 +327,8 @@ async function cmdManager() {
 
       const anchor = anchorOutcomeOfTestcase[oc.testcase];
       const anchorOutcome = anchor?.outcome ?? ' ?';
-      const anchorColor = colorOfOutcome[anchor?.outcome] ?? 'white';
-      console.log(`was\t%c${anchorOutcome}`, `color: ${anchorColor}`);
+      const anchorStyle = styleOfOutcome(anchor?.outcome, 'failure');
+      console.log(`was\t%c${anchorOutcome}`, `${anchorStyle}`);
 
       const lines = oc.error.toString().split("\n");
       for (let i = 0; i < lines.length; i++) {

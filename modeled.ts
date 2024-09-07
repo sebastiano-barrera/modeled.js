@@ -552,6 +552,13 @@ class VMFunction extends VMInvokable {
 		public declScope: Scope,
 	) {
 		super(params, declScope);
+
+		this.defineProperty("length", {
+			value: { type: "number", value: params.length },
+			configurable: false,
+			enumerable: false,
+			writable: false,
+		});
 	}
 
 	run(vm: VM, _subject: JSValue, _args: JSValue[]) {

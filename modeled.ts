@@ -496,6 +496,13 @@ abstract class VMInvokable extends VMObject {
 					defaultValue: { type: "undefined" },
 				});
 
+				vm.setVar("arguments", () => {
+					const argumentsArray = new VMArray();
+					argumentsArray.isArgsArray = true;
+					argumentsArray.arrayElements.push(...args);
+					return argumentsArray;
+				});
+
 				// not all subclasses have named params
 				if (this.params !== undefined) {
 					// #func-param-define
@@ -526,13 +533,6 @@ abstract class VMInvokable extends VMObject {
 						vm.setVar(name, value);
 					}
 				}
-
-				vm.setVar("arguments", () => {
-					const argumentsArray = new VMArray();
-					argumentsArray.isArgsArray = true;
-					argumentsArray.arrayElements.push(...args);
-					return argumentsArray;
-				});
 
 				return this.run(vm, subject, args, options);
 			}));

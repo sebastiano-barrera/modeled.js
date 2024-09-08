@@ -1632,14 +1632,12 @@ export class VM {
 		async?: boolean;
 		generator?: boolean;
 	}): VMFunction {
-		assert(
-			(declNode.async ?? false) === false,
-			"async functions not supported",
-		);
-		assert(
-			(declNode.generator ?? false) === false,
-			"generator functions not supported",
-		);
+		if (declNode.async) {
+			throw new ArbitrarilyLeftUnimplemented("async functions not supported");
+		}
+		if (declNode.generator) {
+			throw new ArbitrarilyLeftUnimplemented("generator functions not supported");
+		}
 
 		const func = this.makeFunction(declNode.params, declNode.body);
 

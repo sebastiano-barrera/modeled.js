@@ -1633,10 +1633,14 @@ export class VM {
 		generator?: boolean;
 	}): VMFunction {
 		if (declNode.async) {
-			throw new ArbitrarilyLeftUnimplemented("async functions not supported");
+			throw new ArbitrarilyLeftUnimplemented(
+				"async functions not supported",
+			);
 		}
 		if (declNode.generator) {
-			throw new ArbitrarilyLeftUnimplemented("generator functions not supported");
+			throw new ArbitrarilyLeftUnimplemented(
+				"generator functions not supported",
+			);
 		}
 
 		const func = this.makeFunction(declNode.params, declNode.body);
@@ -2711,7 +2715,7 @@ export class VM {
 		} else if (targetExpr.type === "Identifier") {
 			const name = targetExpr.name;
 			if (
-				this.currentScope.isStrict() &&
+				this.currentScope!.isStrict() &&
 				(name === "eval" || name === "arguments")
 			) {
 				return this.throwError(
@@ -4044,23 +4048,27 @@ function initGlobalObject(G: VMObject): void {
 		// even when invoked as `new Function(...)`, discard this, return another object
 
 		if (args.length === 0) {
-			throw new VMError(
+			throw new AssertionError(
 				"not yet implemented: new Function() called without arguments",
 			);
 		}
 
+		const argStrs: string[] = [];
+
 		for (let i = 0; i < args.length; i++) {
-			if (args[i].type !== "string") {
+			const arg = args[i];
+			if (arg.type !== "string") {
 				return vm.throwError(
 					"TypeError",
 					`argument[${i}] is not a string`,
 				);
 			}
+			argStrs.push(arg.value);
 		}
 
 		const paramNodes = [];
-		for (let i = 0; i < args.length - 1; i++) {
-			const argStr = args[i].value.trim();
+		for (let i=0; i < argStrs.length - 1; i++) {
+			const argStr = argStrs[i].trim();
 			if (argStr === "") continue;
 			const paramNode = acorn.parseExpressionAt(argStr, 0, {
 				ecmaVersion: 2024,
@@ -4068,7 +4076,7 @@ function initGlobalObject(G: VMObject): void {
 			paramNodes.push(paramNode);
 		}
 
-		const text = args[args.length - 1].value;
+		const text = argStrs[argStrs.length - 1];
 		let ast;
 		try {
 			ast = acorn.parse(text, {
@@ -4080,7 +4088,7 @@ function initGlobalObject(G: VMObject): void {
 		} catch (error) {
 			// acorn throws a builtin SyntaxError; we convert it into a guest SyntaxError
 			if (error instanceof SyntaxError) {
-				error = vm.makeError("SyntaxError", error.message, error);
+				throw vm.makeError("SyntaxError", error.message, error);
 			}
 			throw error;
 		}

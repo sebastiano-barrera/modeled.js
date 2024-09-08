@@ -4067,7 +4067,7 @@ function initGlobalObject(G: VMObject): void {
 		}
 
 		const paramNodes = [];
-		for (let i=0; i < argStrs.length - 1; i++) {
+		for (let i = 0; i < argStrs.length - 1; i++) {
 			const argStr = argStrs[i].trim();
 			if (argStr === "") continue;
 			const paramNode = acorn.parseExpressionAt(argStr, 0, {

@@ -1,9 +1,5 @@
 {
   "testCases": [
-    "implementation-contributed/javascriptcore/modules/export-default-function-hoisting/cocoa.js",
-    "implementation-contributed/javascriptcore/modules/exported-function-may-be-called-before-module-is-executed/1.js",
-    "implementation-contributed/javascriptcore/modules/exported-function-may-be-called-before-module-is-executed/2.js",
-    "src/async-functions/await-as-binding-identifier-escaped.case",
     "src/async-functions/await-as-binding-identifier.case",
     "src/async-functions/await-as-identifier-reference-escaped.case",
     "src/async-functions/await-as-identifier-reference.case",
@@ -610,6 +606,7 @@
     "test/language/expressions/async-arrow-function/try-throw-finally-throw.js",
     "test/language/expressions/async-arrow-function/unscopables-with-in-nested-fn.js",
     "test/language/expressions/async-arrow-function/unscopables-with.js",
+    "test/language/expressions/async-arrow-function/prototype.js",
     "test/language/expressions/async-function/await-as-binding-identifier-escaped.js",
     "test/language/expressions/async-function/await-as-binding-identifier.js",
     "test/language/expressions/async-function/await-as-identifier-reference-escaped.js",
@@ -928,7 +925,6 @@
     "test/language/expressions/function/named-no-strict-reassign-fn-name-in-body-in-arrow.js",
     "test/language/expressions/function/named-no-strict-reassign-fn-name-in-body-in-eval.js",
     "test/language/expressions/function/named-no-strict-reassign-fn-name-in-body.js",
-    "test/language/expressions/function/named-strict-error-reassign-fn-name-in-body-in-arrow.js",
     "test/language/expressions/function/named-strict-error-reassign-fn-name-in-body-in-eval.js",
     "test/language/expressions/function/named-strict-error-reassign-fn-name-in-body.js",
     "test/language/expressions/function/object-destructuring-param-strict-body.js",
@@ -967,6 +963,7 @@
     "test/language/expressions/function/unscopables-with.js",
     "test/language/expressions/function/use-strict-with-non-simple-param.js",
     "test/language/expressions/function/scope-name-var-close.js",
+    "test/language/expressions/function/named-strict-error-reassign-fn-name-in-body-in-arrow.js",
     "test/language/function-code/10.4.3-1-1-s.js",
     "test/language/function-code/10.4.3-1-10-s.js",
     "test/language/function-code/10.4.3-1-100-s.js",

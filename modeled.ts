@@ -200,7 +200,7 @@ class VMObject {
 			} else {
 				subject = this;
 			}
-			return vm.performCall(descriptor.get, subject, []);
+			return descriptor.get.invoke(vm, subject, []);
 		}
 		assert(
 			descriptor.value !== undefined,
@@ -280,7 +280,7 @@ class VMObject {
 				vm instanceof VM,
 				"looking up described value but vm not passed",
 			);
-			return vm.performCall(descriptor.set, this, [value]);
+			return descriptor.set.invoke(vm, this, [value]);
 		} else if (descriptor.get === undefined) {
 			descriptor.value = value;
 		} else {
@@ -1204,14 +1204,6 @@ export class VM {
 		if (options?.breakable) {
 			this.catchBreak(options?.label, inner);
 		} else inner();
-	}
-
-	performCall(callee: VMInvokable, subject: JSValue, args: JSValue[]) {
-		assert(
-			callee instanceof VMInvokable,
-			() => "callee is not a function (native or virtual)",
-		);
-		return callee.invoke(this, subject, args);
 	}
 
 	runStmt(node: Node, details?: {
@@ -2154,7 +2146,7 @@ export class VM {
 						"callee must be callable, not " + callee.type,
 					);
 				}
-				return this.performCall(callee, callThis, args);
+				return callee.invoke(this, callThis, args);
 			}
 
 			case "ThisExpression": {
@@ -3363,7 +3355,9 @@ function initBuiltins(realm: Realm) {
 		nativeVMFunc((vm, subject, args) => {
 			const candidate = vm.coerceToObject(subject);
 			const obj = vm.coerceToObject(args[0] || { type: "undefined" });
-			const ret = obj.walkPrototypeChain((cur) => cur.is(candidate) || null);
+			const ret = obj.walkPrototypeChain((cur) =>
+				cur.is(candidate) || null
+			);
 			return { type: "boolean", value: ret ?? false };
 		}),
 	);
@@ -3452,7 +3446,7 @@ function initBuiltins(realm: Realm) {
 				);
 			} else if (arg1 instanceof VMInvokable) {
 				retStr = subject.primitive.value.replace(arg0.value, () => {
-					const ret = vm.performCall(arg1, { type: "undefined" }, [
+					const ret = arg1.invoke(vm, { type: "undefined" }, [
 						arg0,
 					]);
 					if (ret.type !== "string") {
@@ -3868,7 +3862,9 @@ function initGlobalObject(G: VMObject): void {
 					"argument 2 (the candidate prototype) must be an object",
 				);
 			}
-			const ret = obj.walkPrototypeChain((cur) => cur.is(candidate) || null);
+			const ret = obj.walkPrototypeChain((cur) =>
+				cur.is(candidate) || null
+			);
 			return { type: "boolean", value: ret ?? false };
 		}),
 	);
@@ -4056,7 +4052,10 @@ function initGlobalObject(G: VMObject): void {
 
 		for (let i = 0; i < args.length; i++) {
 			if (args[i].type !== "string") {
-				return vm.throwError("TypeError", `argument[${i}] is not a string`);
+				return vm.throwError(
+					"TypeError",
+					`argument[${i}] is not a string`,
+				);
 			}
 		}
 
@@ -4404,7 +4403,8 @@ function hoistDeclarations(node: Node) {
 		if (RESERVED_WORDS.has(name)) {
 			throw new ExceptionRequest(
 				"SyntaxError",
-				"reserved word can't be used as identifier in declaration: " + name,
+				"reserved word can't be used as identifier in declaration: " +
+					name,
 			);
 		}
 

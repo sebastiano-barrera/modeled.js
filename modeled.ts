@@ -495,6 +495,7 @@ abstract class VMInvokable extends VMObject {
 					allowRedecl: true,
 					defaultValue: { type: "undefined" },
 				});
+				vm.setDoNotDelete("arguments");
 
 				vm.setVar("arguments", () => {
 					const argumentsArray = new VMArray();

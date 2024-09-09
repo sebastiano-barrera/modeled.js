@@ -438,7 +438,7 @@ abstract class VMInvokable extends VMObject {
 
 	constructor(
 		public params: string[],
-		public readonly declScope: Scope,
+		public readonly declScope: Scope,	
 		consPrototype?: VMObject,
 	) {
 		super(R().PROTO_FUNCTION);
@@ -1090,7 +1090,6 @@ export class VM {
 		assert(node.sourceType === "script", "only script is supported");
 		assert(this.currentScope === null, "nested program!");
 
-		//
 		hoistDeclarations(node);
 
 		try {
@@ -4318,33 +4317,27 @@ function hoistDeclarations(node: Node) {
 			_state,
 			ancestors,
 		) {
+			if (!node.id) return;
+
 			assert(
 				ancestors[ancestors.length - 1] === node,
 				"unexpected: ancestors[last] is not node",
 			);
 			ancestors = ancestors.slice(0, -1);
 
-			if (node.id) {
-				hoist(node.id.name, ancestors, {
-					toTopOf: "block",
-					functionDecl: node,
-					defineOptions: {
-						allowRedecl: true,
-						allowAsGlobalObjectProperty: true,
-						// no TDZ for these
-						defaultValue: { type: "undefined" },
-					},
-				});
-			}
+			hoist(node.id.name, ancestors, {
+				toTopOf: "block",
+				functionDecl: node,
+				defineOptions: {
+					allowRedecl: true,
+					allowAsGlobalObjectProperty: true,
+					// no TDZ for these
+					defaultValue: { type: "undefined" },
+				},
+			});
 		},
 
 		FunctionExpression(node, state, ancestors) {
-			if (!node.id) return;
-
-			assert(
-				node.id.type === "Identifier",
-				"FunctionExpression: id not an Identifier?",
-			);
 			return this.FunctionDeclaration!(node, state, ancestors);
 		},
 

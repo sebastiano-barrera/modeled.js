@@ -1093,9 +1093,25 @@ export class VM {
 		hoistDeclarations(node);
 
 		try {
-			// pass the full Program node to runStmt to make sure that hoisted declarations
-			// are processed
-			this.runStmt(node);
+			const scope = new EnvVarScope(this.globalObj);
+			scope.this = this.globalObj;
+			scope.defineVar("globalThis", {
+				allowRedecl: true,
+				defaultValue: this.globalObj,
+			});
+			if (
+				node.body.length > 0 &&
+				node.body[0].type === "ExpressionStatement" &&
+				node.body[0].directive === "use strict"
+			) {
+				scope.isSetStrict = true;
+			}
+
+			this.switchScope(scope, () => {
+				// pass the full Program node to runBlock to make sure that hoisted declarations
+				// are processed
+				return this.runBlock(node);
+			});
 		} catch (error) {
 			if (error.isContinueFor !== undefined) {
 				throw new AssertionError(
@@ -1225,8 +1241,11 @@ export class VM {
 
 			const stmt = <Node & (acorn.Statement | acorn.Program)> node;
 			switch (stmt.type) {
-				// each of these handlers returns the *completion value* of the statement (if any)
+				case "Program":
+					throw new AssertionError("Program nodes are not supposed to go through here!");
 
+				// each of these handlers returns the *completion value* of the statement (if any)
+				
 				case "WithStatement":
 				case "ClassDeclaration":
 					throw new ArbitrarilyLeftUnimplemented(
@@ -1236,36 +1255,13 @@ export class VM {
 				case "EmptyStatement":
 					return;
 
-				case "Program":
 				case "BlockStatement": {
-					let scope;
-					if (stmt.type === "Program") {
-						scope = new EnvVarScope(this.globalObj);
-						scope.this = this.globalObj;
-						scope.defineVar("globalThis", {
-							allowRedecl: true,
-							defaultValue: this.globalObj,
-						});
-						if (
-							stmt.body.length > 0 &&
-							stmt.body[0].type === "ExpressionStatement" &&
-							stmt.body[0].directive === "use strict"
-						) {
-							scope.isSetStrict = true;
-						}
-					} else if (stmt.type === "BlockStatement") {
-						scope = new VarScope();
-					} else throw new AssertionError();
-
-					scope.parent = this.currentScope;
-
-					this.switchScope(scope, () => {
+					return this.nestScope(() => {
 						return this.runBlock(stmt, {
 							label: details?.label,
 							breakable: !details?.noBreak,
 						});
 					});
-					return;
 				}
 
 				case "TryStatement":

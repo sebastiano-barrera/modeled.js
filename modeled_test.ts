@@ -33,7 +33,7 @@ function findPatternJS(patternJS: string): acorn.Pattern {
 function bindingPatternJS(patternJS: string, value: M.JSValue): BindingSet {
 	const patternAST = findPatternJS(patternJS);
 	const bset = new Map<string, M.JSValue>();
-	bindingPattern(
+	M.bindingPattern(
 		M._CV!,
 		patternAST,
 		value,
@@ -43,104 +43,6 @@ function bindingPatternJS(patternJS: string, value: M.JSValue): BindingSet {
 }
 
 type BindingSet = Map<string, M.JSValue>;
-
-function bindingPattern(
-	vm: M.VM,
-	pattern: acorn.Pattern,
-	value: M.JSValue,
-	bind: (name: string, value: M.JSValue) => void,
-) {
-	if (pattern.type === "Identifier") {
-		const ident = pattern.name;
-		bind(ident, value);
-	} else if (pattern.type === "ObjectPattern") {
-		const object = vm.coerceToObject(value);
-		if (object === undefined) {
-			return vm.throwError(
-				"TypeError",
-				"object pattern can't be matched with value that can't be coerced to object",
-			);
-		}
-
-		const count = pattern.properties.length;
-		if (count === 0) {
-			return;
-		}
-
-		const last = pattern.properties[count - 1];
-		const restObj: undefined | M.VMObject = last.type === "RestElement"
-			? object.shallowCopy()
-			: undefined;
-
-		for (const prop of pattern.properties) {
-			if (prop.type === "Property") {
-				if (prop.key.type === "Identifier") {
-					const key = prop.key.name;
-					const subValue = object.getProperty(key) ??
-						{ type: "undefined" };
-					bindingPattern(vm, prop.value, subValue, bind);
-					if (restObj !== undefined) {
-						restObj.deleteProperty(key);
-					}
-				} else {
-					return vm.throwError(
-						"TypeError",
-						"unsupported syntax for object pattern key: " +
-							prop.key.type,
-					);
-				}
-			} else if (prop.type === "RestElement") {
-				if (restObj instanceof M.VMObject) {
-					bindingPattern(vm, prop.argument, restObj, bind);
-				} else {
-					throw new Error("there should be an object here!");
-				}
-			} else {
-				const x: never = prop;
-			}
-		}
-	} else if (pattern.type === "ArrayPattern") {
-		const object = vm!.coerceToObject(value);
-
-		const count = pattern.elements.length;
-		if (count === 0) {
-			return;
-		}
-		// const last = pattern.elements[count - 1];
-
-		for (let i = 0; i < count; i++) {
-			const elmPat = pattern.elements[i];
-			if (elmPat === null) continue;
-
-			if (elmPat.type === "RestElement") {
-				if (i !== count - 1) {
-					throw new Error("pattern item ...rest must be last");
-				}
-
-				const restArray = new M.VMArray();
-				let elm;
-				for (; (elm = object.getIndex(i)) !== undefined; i++) {
-					restArray.arrayElements.push(elm);
-				}
-				return bindingPattern(vm, elmPat.argument, restArray, bind);
-			}
-
-			const elm = object.getIndex(i) ?? { type: "undefined" };
-			bindingPattern(vm, elmPat, elm, bind);
-		}
-
-		// TODO
-	} else if (pattern.type === "AssignmentPattern") {
-		if (value.type === "undefined") {
-			const fallbackValue = vm!.evalExpr(pattern.right);
-			bindingPattern(vm, pattern.left, fallbackValue, bind);
-		} else {
-			bindingPattern(vm, pattern.left, value, bind);
-		}
-	} else {
-		throw new Error("unsupported/invalid pattern type: " + pattern.type);
-	}
-}
 
 Deno.test("simple identifier", () => {
 	using _ = useNewVM();

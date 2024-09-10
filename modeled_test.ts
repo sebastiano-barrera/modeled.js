@@ -1,6 +1,5 @@
 import * as M from "./modeled.ts";
 import * as acorn from "npm:acorn";
-import * as acornWalk from "npm:acorn-walk";
 
 import { expect } from "jsr:@std/expect";
 
@@ -34,13 +33,14 @@ function findPatternJS(patternJS: string): acorn.Pattern {
 function bindingPatternJS(patternJS: string, value: M.JSValue): BindingSet {
 	const patternAST = findPatternJS(patternJS);
 	const bset = new Map<string, M.JSValue>();
-	bindingPattern(patternAST, value, (name, value) => bset.set(name, value));
+	bindingPattern(M._CV!, patternAST, value, (name, value) => bset.set(name, value));
 	return bset;
 }
 
 type BindingSet = Map<string, M.JSValue>;
 
 function bindingPattern(
+	vm: M.VM,
 	pattern: acorn.Pattern,
 	value: M.JSValue,
 	bind: (name: string, value: M.JSValue) => void,
@@ -49,9 +49,9 @@ function bindingPattern(
 		const ident = pattern.name;
 		bind(ident, value);
 	} else if (pattern.type === "ObjectPattern") {
-		const object = M._CV?.coerceToObject(value);
+		const object = vm.coerceToObject(value);
 		if (object === undefined) {
-			return M._CV!.throwError(
+			return vm.throwError(
 				"TypeError",
 				"object pattern can't be matched with value that can't be coerced to object",
 			);
@@ -73,12 +73,12 @@ function bindingPattern(
 					const key = prop.key.name;
 					const subValue = object.getProperty(key) ??
 						{ type: "undefined" };
-					bindingPattern(prop.value, subValue, bind);
+					bindingPattern(vm, prop.value, subValue, bind);
 					if (restObj !== undefined) {
 						restObj.deleteProperty(key);
 					}
 				} else {
-					return M._CV!.throwError(
+					return vm.throwError(
 						"TypeError",
 						"unsupported syntax for object pattern key: " +
 							prop.key.type,
@@ -86,7 +86,7 @@ function bindingPattern(
 				}
 			} else if (prop.type === "RestElement") {
 				if (restObj instanceof M.VMObject) {
-					bindingPattern(prop.argument, restObj, bind);
+					bindingPattern(vm, prop.argument, restObj, bind);
 				} else {
 					throw new Error("there should be an object here!");
 				}
@@ -95,6 +95,8 @@ function bindingPattern(
 			}
 		}
 	} else if (pattern.type === "ArrayPattern") {
+		const object = vm!.coerceToObject(value);
+
 		const count = pattern.elements.length;
 		if (count === 0) {
 			return;
@@ -103,15 +105,32 @@ function bindingPattern(
 
 		for (let i = 0; i < count; i++) {
 			const elmPat = pattern.elements[i];
+			if (elmPat === null) continue;
+
+			if (elmPat.type === "RestElement") {
+				if (i !== count - 1) {
+					throw new Error("pattern item ...rest must be last");
+				}
+
+				const restArray = new M.VMArray();
+				let elm;
+				for (; (elm = object.getIndex(i)) !== undefined; i++) {
+					restArray.arrayElements.push(elm);
+				}
+				return bindingPattern(vm, elmPat.argument, restArray, bind);
+			}
+
+			const elm = object.getIndex(i) ?? { type: 'undefined' };
+			bindingPattern(vm, elmPat, elm, bind);
 		}
 
 		// TODO
 	} else if (pattern.type === "AssignmentPattern") {
 		if (value.type === "undefined") {
-			const fallbackValue = M._CV!.evalExpr(pattern.right);
-			bindingPattern(pattern.left, fallbackValue, bind);
+			const fallbackValue = vm!.evalExpr(pattern.right);
+			bindingPattern(vm, pattern.left, fallbackValue, bind);
 		} else {
-			bindingPattern(pattern.left, value, bind);
+			bindingPattern(vm, pattern.left, value, bind);
 		}
 	} else {
 		throw new Error("unsupported/invalid pattern type: " + pattern.type);
@@ -173,8 +192,6 @@ Deno.test("pattern: object, coerce", () => {
 
 	const value: M.JSValue = { type: "number", value: 123.0 };
 	const bset = bindingPatternJS("var {valueOf, toString} = _", value);
-
-	console.log(bset);
 
 	expect(bset.size).toBe(2);
 	expect(bset.get("valueOf")?.type).toBe("function");
@@ -240,4 +257,45 @@ Deno.test("pattern: array single element", () => {
 
 	expect(bset.size).toBe(1);
 	expect(bset.get("x")).toBe(num);
+});
+
+Deno.test("pattern: array multiple elements", () => {
+	using _ = useNewVM();
+
+	const num0: M.JSValue = { type: "number", value: 8234135.1 };
+	const num1: M.JSValue = { type: "number", value: 235.1 };
+	const num2: M.JSValue = { type: "number", value: 82115.1234 };
+	const value = new M.VMArray();
+	value.setIndex(0, num0);
+	value.setIndex(1, num1);
+	value.setIndex(2, num2);
+	const bset = bindingPatternJS("var [x, y, z, t] = _", value);
+
+	expect(bset.size).toBe(4);
+	expect(bset.get("x")).toBe(num0);
+	expect(bset.get("y")).toBe(num1);
+	expect(bset.get("z")).toBe(num2);
+	expect(bset.get("t")).toMatchObject({type: 'undefined'});
+});
+
+Deno.test("pattern: array with rest pattern", () => {
+	using _ = useNewVM();
+
+	const num0: M.JSValue = { type: "number", value: 8234135.1 };
+	const num1: M.JSValue = { type: "number", value: 235.1 };
+	const num2: M.JSValue = { type: "number", value: 82115.1234 };
+	const value = new M.VMArray();
+	value.setIndex(0, num0);
+	value.setIndex(1, num1);
+	value.setIndex(2, num2);
+	const bset = bindingPatternJS("var [x, ...rest] = _", value);
+
+	expect(bset.size).toBe(2);
+	expect(bset.get("x")).toBe(num0);
+
+	const rest = <M.VMArray> bset.get("rest");
+	expect(rest).toBeInstanceOf(M.VMArray);
+	expect(rest.arrayElements).toHaveLength(2);
+	expect(rest.arrayElements[0]).toBe(num1);
+	expect(rest.arrayElements[1]).toBe(num2);
 });

@@ -1057,7 +1057,7 @@ export class VM {
 		}
 		textOfSource.set(path, text);
 
-		withVM(this, () => {
+		return withVM(this, () => {
 			try {
 				const ast = acorn.parse(text, {
 					ecmaVersion: 2024,

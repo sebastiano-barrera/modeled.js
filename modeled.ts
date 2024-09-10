@@ -4517,7 +4517,7 @@ function hoistDeclarations(node: Node) {
 							}
 						}
 					} else if (pat.type === "RestElement") {
-						throw new AssertionError("not yet implmented");
+						queue.push(pat.argument);
 					} else if (pat.type === "AssignmentPattern") {
 						queue.push(pat.left);
 					} else {

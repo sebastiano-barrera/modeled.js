@@ -148,6 +148,9 @@ interface VMRegExp extends VMObject {
 }
 
 class VMObject {
+  shallowCopy(): VMObject | undefined {
+    throw new Error("Method not implemented.");
+  }
 	readonly type: "object" | "function" = "object";
 	descriptors: Map<PropName, Descriptor> = new Map();
 
@@ -438,7 +441,7 @@ abstract class VMInvokable extends VMObject {
 
 	constructor(
 		public params: string[],
-		public readonly declScope: Scope,	
+		public readonly declScope: Scope,
 		consPrototype?: VMObject,
 	) {
 		super(R().PROTO_FUNCTION);
@@ -1242,10 +1245,12 @@ export class VM {
 			const stmt = <Node & (acorn.Statement | acorn.Program)> node;
 			switch (stmt.type) {
 				case "Program":
-					throw new AssertionError("Program nodes are not supposed to go through here!");
+					throw new AssertionError(
+						"Program nodes are not supposed to go through here!",
+					);
 
 				// each of these handlers returns the *completion value* of the statement (if any)
-				
+
 				case "WithStatement":
 				case "ClassDeclaration":
 					throw new ArbitrarilyLeftUnimplemented(
@@ -1347,41 +1352,140 @@ export class VM {
 				}
 
 				case "VariableDeclaration": {
-					if (
-						stmt.kind !== "var" && stmt.kind !== "let" &&
-						stmt.kind !== "const"
-					) {
-						throw new AssertionError(
-							"unsupported var decl type: " + stmt.kind,
-						);
-					}
-
 					for (const decl of stmt.declarations) {
-						assert(
-							decl.type === "VariableDeclarator",
-							"decl type must be VariableDeclarator",
-						);
-						if (decl.id.type === "Identifier") {
-							if (decl.init === undefined || decl.init === null) {
-								continue;
-							}
-							const name = decl.id.name;
-							const value: JSValue = this.evalExpr(decl.init);
+						const initValue: JSValue =
+							decl.init === undefined || decl.init === null
+							? {type: 'undefined'}
+							: this.evalExpr(decl.init);
 
-							// `defineVar` for this name must have already been done by hoistDeclarations
-							// and #run-functionDefs
-							this.currentScope!.setVar(name, value, this, {
-								initialize: true,
-							});
+						type Item = {
+							pattern: acorn.Pattern;
+							value: JSValue;
+						};
+						const queue: Item[] = [
+							{ pattern: decl.id, value: initValue },
+						];
 
-							if (stmt.declarations.length === 1) {
-								this.completionValue = value;
+						let item: Item | undefined;
+						while ((item = queue.pop()) !== undefined) {
+							console.group("--- decl queue item");
+							try {
+								const { pattern, value } = item;
+
+								console.log('pattern', pattern);
+
+								if (pattern.type === "Identifier") {
+									// `defineVar` for this name must have already been done by hoistDeclarations
+									// and #run-functionDefs
+									console.log("assign", pattern.name, value);
+									this.currentScope!.setVar(pattern.name, value, this, {
+										initialize: true,
+									});
+
+								} else if (pattern.type === "MemberExpression") {
+									throw new AssertionError("MemberExpression is not supposed to be on lhs of a binding declaration (I think)");
+									
+								} else if (pattern.type === "ObjectPattern") {
+									const object = this.coerceToObject(value);
+
+									const propCount = pattern.properties.length;
+									if (propCount === 0)
+										continue;
+
+									const last = pattern.properties[propCount - 1];
+									const restObj: VMObject | undefined
+										= last.type === "RestElement" ? object.shallowCopy() : undefined;
+									const nonRestCount = restObj !== undefined ? propCount : (propCount - 1);
+
+									console.log(`object ${propCount} keys (${nonRestCount} non-rest; lastType = ${last.type}; rest = ${restObj})`);
+
+									for (let i=0; i < nonRestCount; i++) {
+										const propertyProp = pattern.properties[i];
+										if (propertyProp.type !== "Property") {
+											return this.throwError(
+												"SyntaxError",
+												"object binding pattern: '...rest' item must be last",
+											);
+										}
+
+										assert(propertyProp.method, "propertyProp.method does not make sense here!");
+										const key = this.keyOfPropertyNode(propertyProp);
+										const value = object.getProperty(key);
+										if (value === undefined) {
+											// TODO add some meat to this message
+											return this.throwError("TypeError", "can't bind pattern to undefined");
+										}
+										console.log('object pattern, key', key, 'value', value);
+										queue.push({
+											pattern: propertyProp.value,
+											value, 
+										});
+
+										if (restObj) {
+											restObj.deleteProperty(key);
+										}
+									}
+
+									if (restObj) {
+										console.log('rest');
+										assert(last.type === "RestElement", "--");
+										queue.push({
+											pattern: last.argument,
+											value: restObj,
+										});
+									}
+
+								} else if (pattern.type === "ArrayPattern") {
+									const object = this.coerceToObject(value);
+
+									// TODO Generalize to iterables
+									if (!(object instanceof VMArray)) {
+										return this.throwError(
+											"TypeError",
+											"only arrays are supported in [a, b, ...r] binding patterns"
+										);
+									}
+
+									const count = pattern.elements.length;
+									if (count === 0) 
+										continue;
+
+									const last = pattern.elements[count - 1];
+									const nonRestCount =
+										last?.type === "RestElement" ? (count - 1) : count;
+
+									for (let i=0; i < nonRestCount; i++) {
+										const pat = pattern.elements[i];
+										const element = object.getIndex(i);
+										if (pat !== null && element !== undefined) {
+											queue.push({
+												pattern: pat,
+												value: element,
+											});
+										}
+									}
+
+								} else if (pattern.type === "RestElement") {
+									throw new AssertionError('RestElement must not go through this path');
+
+								} else if (pattern.type === "AssignmentPattern") {
+									const effectiveValue
+										= (value.type === 'undefined') 
+										? this.evalExpr(pattern.right)
+										: value;
+									queue.push({
+										pattern: pattern.left,
+										value: effectiveValue,
+									});
+									throw new AssertionError('not yet implmented');
+
+								} else {
+									const exhCheck: never = pattern;
+									throw new AssertionError(`unsupported/invalid syntax node type in binding assignment lhs: ${pattern}`);
+								}
+							} finally {
+								console.groupEnd();
 							}
-						} else {
-							throw new AssertionError(
-								"unsupported declarator id type: " +
-									decl.id.type,
-							);
 						}
 					}
 					return;
@@ -1794,25 +1898,7 @@ export class VM {
 						"node's shorthand === false",
 					);
 
-					let key: PropName;
-					if (propertyNode.computed === true) {
-						const keyVal = this.evalExpr(propertyNode.key);
-						if (
-							keyVal.type !== "string" && keyVal.type !== "symbol"
-						) {
-							this.throwError(
-								"TypeError",
-								"only string and symbol are allowed as object keys",
-							);
-						}
-						key = keyVal.value;
-					} else {
-						assert(
-							propertyNode.key.type === "Identifier",
-							"only supported: identifier as property name",
-						);
-						key = propertyNode.key.name;
-					}
+					const key: PropName = this.keyOfPropertyNode(propertyNode);
 
 					if (propertyNode.kind === "init") {
 						const value = this.evalExpr(propertyNode.value);
@@ -3130,6 +3216,31 @@ export class VM {
 
 		return str;
 	}
+
+	keyOfPropertyNode(propertyNode: {
+		computed: boolean,
+		key: acorn.Expression,
+	}): PropName {
+		if (propertyNode.computed === true) {
+			const keyVal = this.evalExpr(propertyNode.key);
+			if (
+				keyVal.type !== "string" && keyVal.type !== "symbol"
+			) {
+				this.throwError(
+					"TypeError",
+					"only string and symbol are allowed as object keys",
+				);
+			}
+
+			return keyVal.value;
+		}
+
+		assert(
+			propertyNode.key.type === "Identifier",
+			"only supported: identifier as property name",
+		);
+		return propertyNode.key.name;
+	}
 }
 
 function stringToBigInt(s: string): bigint | undefined {
@@ -4349,36 +4460,84 @@ function hoistDeclarations(node: Node) {
 			ancestors = ancestors.slice(0, -1);
 
 			for (const decl of node.declarations) {
-				assert(
-					decl.id.type === "Identifier",
-					"only supported: variable declarations with Identifier",
-				);
-
+				let hoistOptions: HoistOptions;
 				switch (node.kind) {
-					case "var":
-						hoist(decl.id.name, ancestors, {
-							toTopOf: "function",
-							defineOptions: {
-								defaultValue: { type: "undefined" },
-								allowRedecl: true,
-								allowAsGlobalObjectProperty: true,
-							},
-						});
-						break;
+				case "var":
+					hoistOptions = {
+						toTopOf: "function",
+						defineOptions: {
+							defaultValue: { type: "undefined" },
+							allowRedecl: true,
+							allowAsGlobalObjectProperty: true,
+						},
+					};
+					break;
+				case "let":
+				case "const":
+					hoistOptions = {
+						toTopOf: "block",
+						defineOptions: {
+							allowRedecl: false,
+							allowAsGlobalObjectProperty: false,
+						},
+					};
+					break;
+				default:
+					throw new AssertionError();
+				}
 
-					case "let":
-					case "const":
-						hoist(decl.id.name, ancestors, {
-							toTopOf: "block",
-							defineOptions: {
-								allowRedecl: false,
-								allowAsGlobalObjectProperty: false,
-							},
-						});
-						break;
+				const queue: acorn.Pattern[] = [decl.id];
+				let pat: acorn.Pattern | undefined;
+				while ((pat = queue.pop()) !== undefined) {
+					console.group('hoist ---');
+					try {
+						{
+							const patReduced = {...pat};
+							delete patReduced['start'];
+							delete patReduced['end'];
+							delete patReduced['loc'];
+							console.log('pattern', patReduced);
+						}
 
-					default:
-						throw new AssertionError();
+						if (pat.type === "Identifier") {
+							console.log('-> leaf', pat.name);
+							hoist(pat.name, ancestors, hoistOptions);
+
+						} else if (pat.type === "MemberExpression") {
+							throw new AssertionError("MemberExpression is not supposed to be on lhs of a binding declaration (I think)");
+
+						} else if (pat.type === "ObjectPattern") {
+							for (const propertyProp of pat.properties) {
+								if (propertyProp.type === "Property") {
+									queue.push(propertyProp.value);
+								} else if (propertyProp.type === "RestElement") {
+									queue.push(propertyProp.argument);
+								} else {
+									const excCheck: never = propertyProp;
+									throw new AssertionError();
+								}
+							}
+
+						} else if (pat.type === "ArrayPattern") {
+							for (const elmPattern of pat.elements) {
+								if (elmPattern !== null) {
+									queue.push(elmPattern);
+								}
+							}
+
+						} else if (pat.type === "RestElement") {
+							throw new AssertionError('not yet implmented');
+
+						} else if (pat.type === "AssignmentPattern") {
+							queue.push(pat.left);
+
+						} else {
+							const exhCheck: never = pat;
+							throw new AssertionError(`unsupported/invalid syntax node type in binding assignment lhs: ${pat}`);
+						}
+					} finally {
+						console.groupEnd();
+					}
 				}
 			}
 		},
@@ -4393,7 +4552,11 @@ function hoistDeclarations(node: Node) {
 	}
 
 	/** NOTE `ancestors` MUST not include the declaration node itself */
-	function hoist(name: string, ancestors: Node[], options: HoistOptions) {
+	function hoist(name: string, ancestors: Node[], options: {
+		toTopOf: "function" | "block";
+		functionDecl?: acorn.FunctionDeclaration;
+		defineOptions: DefineOptions;
+	}) {
 		let dest: Node;
 
 		if (RESERVED_WORDS.has(name)) {

@@ -33,7 +33,12 @@ function findPatternJS(patternJS: string): acorn.Pattern {
 function bindingPatternJS(patternJS: string, value: M.JSValue): BindingSet {
 	const patternAST = findPatternJS(patternJS);
 	const bset = new Map<string, M.JSValue>();
-	bindingPattern(M._CV!, patternAST, value, (name, value) => bset.set(name, value));
+	bindingPattern(
+		M._CV!,
+		patternAST,
+		value,
+		(name, value) => bset.set(name, value),
+	);
 	return bset;
 }
 
@@ -120,7 +125,7 @@ function bindingPattern(
 				return bindingPattern(vm, elmPat.argument, restArray, bind);
 			}
 
-			const elm = object.getIndex(i) ?? { type: 'undefined' };
+			const elm = object.getIndex(i) ?? { type: "undefined" };
 			bindingPattern(vm, elmPat, elm, bind);
 		}
 
@@ -165,7 +170,7 @@ Deno.test("object: single property", () => {
 	const value = new M.VMObject();
 	value.setProperty("lol", num);
 	const bset = bindingPatternJS("var {lol} = _", value);
-	expect(bset.get('lol')).toBe(num);
+	expect(bset.get("lol")).toBe(num);
 });
 
 Deno.test("object: single property, absent", () => {
@@ -234,9 +239,9 @@ Deno.test("pattern: object, ...rest", () => {
 
 	const moreKeys = [...more.getOwnPropertyNames()];
 	moreKeys.sort();
-	expect(moreKeys[0]).toBe('c');
-	expect(moreKeys[1]).toBe('d');
-	expect(moreKeys[2]).toBe('e');
+	expect(moreKeys[0]).toBe("c");
+	expect(moreKeys[1]).toBe("d");
+	expect(moreKeys[2]).toBe("e");
 });
 
 Deno.test("pattern: array empty", () => {
@@ -275,7 +280,7 @@ Deno.test("pattern: array multiple elements", () => {
 	expect(bset.get("x")).toBe(num0);
 	expect(bset.get("y")).toBe(num1);
 	expect(bset.get("z")).toBe(num2);
-	expect(bset.get("t")).toMatchObject({type: 'undefined'});
+	expect(bset.get("t")).toMatchObject({ type: "undefined" });
 });
 
 Deno.test("pattern: array with rest pattern", () => {
@@ -298,4 +303,26 @@ Deno.test("pattern: array with rest pattern", () => {
 	expect(rest.arrayElements).toHaveLength(2);
 	expect(rest.arrayElements[0]).toBe(num1);
 	expect(rest.arrayElements[1]).toBe(num2);
+});
+
+Deno.test("pattern: array of objects", () => {
+	using _ = useNewVM();
+
+	const objectsArray = new M.VMArray();
+	for (let i = 0; i < 5; i++) {
+		const obj = new M.VMObject();
+		obj.setProperty("theNumber", { type: "number", value: Math.random() });
+		objectsArray.arrayElements.push(obj);
+	}
+
+	const bset = bindingPatternJS("var [{ theNumber }, ...rest] = _", objectsArray);
+
+	expect(bset.size).toBe(2);
+	const elm0 = <M.VMObject>objectsArray.arrayElements[0];
+	expect(elm0).toBeInstanceOf(M.VMObject);
+	expect(bset.get("theNumber")).toBe(elm0.getProperty("theNumber"));
+
+	const rest = <M.VMArray>bset.get("rest");
+	expect(rest).toBeInstanceOf(M.VMArray);
+	expect(rest.arrayElements).toHaveLength(4);
 });

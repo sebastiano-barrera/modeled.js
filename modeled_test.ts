@@ -173,6 +173,15 @@ Deno.test("object: single property", () => {
 	expect(bset.get("lol")).toBe(num);
 });
 
+Deno.test("object: single property renamed", () => {
+	using _ = useNewVM();
+	const num: M.JSValue = { type: "number", value: 123.0 };
+	const value = new M.VMObject();
+	value.setProperty("lol", num);
+	const bset = bindingPatternJS("var {lol: asd} = _", value);
+	expect(bset.get("asd")).toBe(num);
+});
+
 Deno.test("object: single property, absent", () => {
 	using _ = useNewVM();
 	const value = new M.VMObject();
@@ -350,3 +359,4 @@ Deno.test("pattern: object of array", () => {
 	expect(bset.get("a")).toBe(numbers.arrayElements[0]);
 	expect(bset.get("b")).toBe(numbers.arrayElements[1]);
 });
+

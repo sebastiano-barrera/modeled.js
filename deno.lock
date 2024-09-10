@@ -2,11 +2,30 @@
   "version": "3",
   "packages": {
     "specifiers": {
+      "jsr:@std/assert@^1.0.4": "jsr:@std/assert@1.0.4",
+      "jsr:@std/expect": "jsr:@std/expect@1.0.2",
+      "jsr:@std/internal@^1.0.3": "jsr:@std/internal@1.0.3",
       "jsr:@std/yaml@^0.224.3": "jsr:@std/yaml@0.224.3",
       "npm:acorn": "npm:acorn@8.12.1",
       "npm:acorn-walk": "npm:acorn-walk@8.3.3"
     },
     "jsr": {
+      "@std/assert@1.0.4": {
+        "integrity": "d4c767ea578e5bc09c15b6e503376003e5b2d1f4c0cdf08524a92101ff4d7b96",
+        "dependencies": [
+          "jsr:@std/internal@^1.0.3"
+        ]
+      },
+      "@std/expect@1.0.2": {
+        "integrity": "37d5162eb1d30505e09f77f3fabbf6cde1e81ed0e72d2371cddbce1173eb86b4",
+        "dependencies": [
+          "jsr:@std/assert@^1.0.4",
+          "jsr:@std/internal@^1.0.3"
+        ]
+      },
+      "@std/internal@1.0.3": {
+        "integrity": "208e9b94a3d5649bd880e9ca38b885ab7651ab5b5303a56ed25de4755fb7b11e"
+      },
       "@std/yaml@0.224.3": {
         "integrity": "9da1ed0094f42ba24570b4d88a094b44a793ac7f2bc085c1939d3ac7e11cc0bb"
       }

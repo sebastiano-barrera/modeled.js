@@ -41,11 +41,11 @@ function assertIsValue(t: { type: string; value?: any }): asserts t is JSValue {
 	assert(cond, () => `invalid JSValue (${t.type}): ${Deno.inspect(t)}`);
 }
 
-type JSValue =
+export type JSValue =
 	| JSPrimitive
 	| VMObject;
 
-type JSPrimitive =
+export type JSPrimitive =
 	| { type: "null" }
 	| { type: "undefined" }
 	| { type: "number"; value: number }
@@ -98,7 +98,7 @@ class ExceptionRequest extends Error {
 	}
 }
 
-class ProgramException extends Error {
+export class ProgramException extends Error {
 	context: acorn.Node[];
 
 	constructor(
@@ -147,10 +147,7 @@ interface VMRegExp extends VMObject {
 	innerRE: RegExp;
 }
 
-class VMObject {
-  shallowCopy(): VMObject | undefined {
-    throw new Error("Method not implemented.");
-  }
+export class VMObject {
 	readonly type: "object" | "function" = "object";
 	descriptors: Map<PropName, Descriptor> = new Map();
 
@@ -359,6 +356,19 @@ class VMObject {
 			}
 		}
 	}
+
+	shallowCopy(): VMObject | undefined {
+		const copy = new VMObject();
+		for (const [key, descriptor] of this.descriptors) {
+			copy.descriptors.set(key, descriptor);
+		}
+		copy.primitive = this.primitive;
+		copy.innerRE = this.innerRE;
+		copy.extensionAllowed = this.extensionAllowed;
+		copy.createdFromCoercion = this.createdFromCoercion;
+		copy.isArgsArray = this.isArgsArray;
+		return copy;
+	}
 }
 
 function assertIsObject(vm: VM, value: JSValue): asserts value is VMObject {
@@ -367,7 +377,7 @@ function assertIsObject(vm: VM, value: JSValue): asserts value is VMObject {
 	}
 }
 
-class VMArray extends VMObject {
+export class VMArray extends VMObject {
 	arrayElements: JSValue[] = [];
 
 	constructor() {
@@ -430,7 +440,7 @@ interface InvokeOpts {
 	isNew?: boolean;
 }
 
-abstract class VMInvokable extends VMObject {
+export abstract class VMInvokable extends VMObject {
 	readonly type = "function";
 	isStrict = false;
 
@@ -543,7 +553,7 @@ abstract class VMInvokable extends VMObject {
 	}
 }
 
-class VMFunction extends VMInvokable {
+export class VMFunction extends VMInvokable {
 	static #lastID = 0;
 
 	name: string | null = null;
@@ -598,7 +608,7 @@ function R(): Realm {
 }
 
 // The currently running VM
-let _CV: VM | undefined;
+export let _CV: VM | undefined;
 
 abstract class Scope {
 	isNew = false;
@@ -702,7 +712,7 @@ interface SetOptions {
 	initialize?: boolean;
 }
 
-class VarScope extends Scope {
+export class VarScope extends Scope {
 	vars = new Map<string, "TDZ" | JSValue | (() => JSValue)>();
 	dontOverride = new Set<string>();
 	dontDelete = new Set<string>();
@@ -920,6 +930,23 @@ class EnvVarScope extends Scope {
 
 const textOfSource = new Map<string, string>();
 
+export function setVM(vm: VM) {
+	assert(_CV === undefined, "nested VM execution!");
+	_CV = vm;
+}
+export function clearVM() {
+	assert(_CV !== undefined, "clearVM but no current VM!");
+	_CV = undefined;
+}
+export function withVM<T>(vm: VM, action: () => T): T {
+	try {
+		setVM(vm);
+		return action();
+	} finally {
+		clearVM();
+	}
+}
+
 export class VM {
 	readonly globalObj: VMObject = new VMObject(null);
 	currentScope: Scope | null = null;
@@ -928,17 +955,12 @@ export class VM {
 	readonly realm = new Realm();
 
 	constructor() {
-		try {
-			assert(_CV === undefined, "nested VM execution!");
-			_CV = this;
-
+		withVM(this, () => {
 			// mostly constructors
 			initGlobalObject(this.globalObj);
 			// mostly (built-in) prototypes
 			initBuiltins(this.realm);
-		} finally {
-			_CV = undefined;
-		}
+		});
 	}
 
 	//
@@ -1035,58 +1057,55 @@ export class VM {
 		}
 		textOfSource.set(path, text);
 
-		try {
-			assert(_CV === undefined, "nested VM execution!");
-			_CV = this;
+		withVM(this, () => {
+			try {
+				const ast = acorn.parse(text, {
+					ecmaVersion: 2024,
+					sourceFile: path,
+					locations: true,
+				});
 
-			const ast = acorn.parse(text, {
-				ecmaVersion: 2024,
-				sourceFile: path,
-				locations: true,
-			});
+				this.runProgram(ast);
+				return { outcome: "success" };
+			} catch (origError) {
+				let error = origError;
 
-			this.runProgram(ast);
-			return { outcome: "success" };
-		} catch (origError) {
-			let error = origError;
-
-			// acorn throws a builtin SyntaxError; we convert it into a guest SyntaxError
-			if (error instanceof SyntaxError) {
-				error = this.makeError("SyntaxError", error.message, error);
-			}
-
-			assert(
-				error.continue === undefined && error.break === undefined,
-				"vm bug: control-flow utility exception leaked!",
-			);
-
-			if (error instanceof ProgramException) {
-				const excval = error.exceptionValue;
-				const message = excval.type === "object"
-					? excval.getProperty("message")
-					: excval;
-
-				let programExceptionName: string | undefined = undefined;
-				if (error.exceptionValue instanceof VMObject) {
-					const name = error.exceptionValue.getProperty?.("name");
-					if (name?.type === "string") {
-						programExceptionName = name.value;
-					}
+				// acorn throws a builtin SyntaxError; we convert it into a guest SyntaxError
+				if (error instanceof SyntaxError) {
+					error = this.makeError("SyntaxError", error.message, error);
 				}
 
-				return {
-					outcome: "failure",
-					errorCategory: "vm exception",
-					message,
-					error,
-					programExceptionName,
-				};
-			}
+				assert(
+					error.continue === undefined && error.break === undefined,
+					"vm bug: control-flow utility exception leaked!",
+				);
 
-			throw error;
-		} finally {
-			_CV = undefined;
-		}
+				if (error instanceof ProgramException) {
+					const excval = error.exceptionValue;
+					const message = excval.type === "object"
+						? excval.getProperty("message")
+						: excval;
+
+					let programExceptionName: string | undefined = undefined;
+					if (error.exceptionValue instanceof VMObject) {
+						const name = error.exceptionValue.getProperty?.("name");
+						if (name?.type === "string") {
+							programExceptionName = name.value;
+						}
+					}
+
+					return {
+						outcome: "failure",
+						errorCategory: "vm exception",
+						message,
+						error,
+						programExceptionName,
+					};
+				}
+
+				throw error;
+			}
+		});
 	}
 
 	runProgram(node: acorn.Program): void {
@@ -1355,138 +1374,15 @@ export class VM {
 					for (const decl of stmt.declarations) {
 						const initValue: JSValue =
 							decl.init === undefined || decl.init === null
-							? {type: 'undefined'}
-							: this.evalExpr(decl.init);
+								? { type: "undefined" }
+								: this.evalExpr(decl.init);
 
 						type Item = {
 							pattern: acorn.Pattern;
 							value: JSValue;
 						};
-						const queue: Item[] = [
-							{ pattern: decl.id, value: initValue },
-						];
 
-						let item: Item | undefined;
-						while ((item = queue.pop()) !== undefined) {
-							console.group("--- decl queue item");
-							try {
-								const { pattern, value } = item;
-
-								console.log('pattern', pattern);
-
-								if (pattern.type === "Identifier") {
-									// `defineVar` for this name must have already been done by hoistDeclarations
-									// and #run-functionDefs
-									console.log("assign", pattern.name, value);
-									this.currentScope!.setVar(pattern.name, value, this, {
-										initialize: true,
-									});
-
-								} else if (pattern.type === "MemberExpression") {
-									throw new AssertionError("MemberExpression is not supposed to be on lhs of a binding declaration (I think)");
-									
-								} else if (pattern.type === "ObjectPattern") {
-									const object = this.coerceToObject(value);
-
-									const propCount = pattern.properties.length;
-									if (propCount === 0)
-										continue;
-
-									const last = pattern.properties[propCount - 1];
-									const restObj: VMObject | undefined
-										= last.type === "RestElement" ? object.shallowCopy() : undefined;
-									const nonRestCount = restObj !== undefined ? propCount : (propCount - 1);
-
-									console.log(`object ${propCount} keys (${nonRestCount} non-rest; lastType = ${last.type}; rest = ${restObj})`);
-
-									for (let i=0; i < nonRestCount; i++) {
-										const propertyProp = pattern.properties[i];
-										if (propertyProp.type !== "Property") {
-											return this.throwError(
-												"SyntaxError",
-												"object binding pattern: '...rest' item must be last",
-											);
-										}
-
-										assert(propertyProp.method, "propertyProp.method does not make sense here!");
-										const key = this.keyOfPropertyNode(propertyProp);
-										const value = object.getProperty(key);
-										if (value === undefined) {
-											// TODO add some meat to this message
-											return this.throwError("TypeError", "can't bind pattern to undefined");
-										}
-										console.log('object pattern, key', key, 'value', value);
-										queue.push({
-											pattern: propertyProp.value,
-											value, 
-										});
-
-										if (restObj) {
-											restObj.deleteProperty(key);
-										}
-									}
-
-									if (restObj) {
-										console.log('rest');
-										assert(last.type === "RestElement", "--");
-										queue.push({
-											pattern: last.argument,
-											value: restObj,
-										});
-									}
-
-								} else if (pattern.type === "ArrayPattern") {
-									const object = this.coerceToObject(value);
-
-									// TODO Generalize to iterables
-									if (!(object instanceof VMArray)) {
-										return this.throwError(
-											"TypeError",
-											"only arrays are supported in [a, b, ...r] binding patterns"
-										);
-									}
-
-									const count = pattern.elements.length;
-									if (count === 0) 
-										continue;
-
-									const last = pattern.elements[count - 1];
-									const nonRestCount =
-										last?.type === "RestElement" ? (count - 1) : count;
-
-									for (let i=0; i < nonRestCount; i++) {
-										const pat = pattern.elements[i];
-										const element = object.getIndex(i);
-										if (pat !== null && element !== undefined) {
-											queue.push({
-												pattern: pat,
-												value: element,
-											});
-										}
-									}
-
-								} else if (pattern.type === "RestElement") {
-									throw new AssertionError('RestElement must not go through this path');
-
-								} else if (pattern.type === "AssignmentPattern") {
-									const effectiveValue
-										= (value.type === 'undefined') 
-										? this.evalExpr(pattern.right)
-										: value;
-									queue.push({
-										pattern: pattern.left,
-										value: effectiveValue,
-									});
-									throw new AssertionError('not yet implmented');
-
-								} else {
-									const exhCheck: never = pattern;
-									throw new AssertionError(`unsupported/invalid syntax node type in binding assignment lhs: ${pattern}`);
-								}
-							} finally {
-								console.groupEnd();
-							}
-						}
+						throw new AssertionError("not yet implemented");
 					}
 					return;
 				}
@@ -3218,8 +3114,8 @@ export class VM {
 	}
 
 	keyOfPropertyNode(propertyNode: {
-		computed: boolean,
-		key: acorn.Expression,
+		computed: boolean;
+		key: acorn.Expression;
 	}): PropName {
 		if (propertyNode.computed === true) {
 			const keyVal = this.evalExpr(propertyNode.key);
@@ -3464,9 +3360,7 @@ function initBuiltins(realm: Realm) {
 		nativeVMFunc((vm, subject, args) => {
 			const candidate = vm.coerceToObject(subject);
 			const obj = vm.coerceToObject(args[0] || { type: "undefined" });
-			const ret = obj.walkPrototypeChain((cur) =>
-				cur.is(candidate) || null
-			);
+			const ret = obj.walkPrototypeChain((cur) => cur.is(candidate) || null);
 			return { type: "boolean", value: ret ?? false };
 		}),
 	);
@@ -3971,9 +3865,7 @@ function initGlobalObject(G: VMObject): void {
 					"argument 2 (the candidate prototype) must be an object",
 				);
 			}
-			const ret = obj.walkPrototypeChain((cur) =>
-				cur.is(candidate) || null
-			);
+			const ret = obj.walkPrototypeChain((cur) => cur.is(candidate) || null);
 			return { type: "boolean", value: ret ?? false };
 		}),
 	);
@@ -4420,7 +4312,7 @@ const NODE_TYPES_WITH_BINDINGS = [
 function hoistDeclarations(node: Node) {
 	const visitor: acornWalk.AncestorVisitors<acorn.Node> = {
 		FunctionDeclaration(
-			node: acorn.FunctionDeclaration,
+			node: acorn.FunctionDeclaration | acorn.AnonymousFunctionDeclaration,
 			_state,
 			ancestors,
 		) {
@@ -4444,10 +4336,6 @@ function hoistDeclarations(node: Node) {
 			});
 		},
 
-		FunctionExpression(node, state, ancestors) {
-			return this.FunctionDeclaration!(node, state, ancestors);
-		},
-
 		VariableDeclaration(
 			node: acorn.VariableDeclaration,
 			_state,
@@ -4462,81 +4350,65 @@ function hoistDeclarations(node: Node) {
 			for (const decl of node.declarations) {
 				let hoistOptions: HoistOptions;
 				switch (node.kind) {
-				case "var":
-					hoistOptions = {
-						toTopOf: "function",
-						defineOptions: {
-							defaultValue: { type: "undefined" },
-							allowRedecl: true,
-							allowAsGlobalObjectProperty: true,
-						},
-					};
-					break;
-				case "let":
-				case "const":
-					hoistOptions = {
-						toTopOf: "block",
-						defineOptions: {
-							allowRedecl: false,
-							allowAsGlobalObjectProperty: false,
-						},
-					};
-					break;
-				default:
-					throw new AssertionError();
+					case "var":
+						hoistOptions = {
+							toTopOf: "function",
+							defineOptions: {
+								defaultValue: { type: "undefined" },
+								allowRedecl: true,
+								allowAsGlobalObjectProperty: true,
+							},
+						};
+						break;
+					case "let":
+					case "const":
+						hoistOptions = {
+							toTopOf: "block",
+							defineOptions: {
+								allowRedecl: false,
+								allowAsGlobalObjectProperty: false,
+							},
+						};
+						break;
+					default:
+						throw new AssertionError();
 				}
 
 				const queue: acorn.Pattern[] = [decl.id];
 				let pat: acorn.Pattern | undefined;
 				while ((pat = queue.pop()) !== undefined) {
-					console.group('hoist ---');
-					try {
-						{
-							const patReduced = {...pat};
-							delete patReduced['start'];
-							delete patReduced['end'];
-							delete patReduced['loc'];
-							console.log('pattern', patReduced);
-						}
-
-						if (pat.type === "Identifier") {
-							console.log('-> leaf', pat.name);
-							hoist(pat.name, ancestors, hoistOptions);
-
-						} else if (pat.type === "MemberExpression") {
-							throw new AssertionError("MemberExpression is not supposed to be on lhs of a binding declaration (I think)");
-
-						} else if (pat.type === "ObjectPattern") {
-							for (const propertyProp of pat.properties) {
-								if (propertyProp.type === "Property") {
-									queue.push(propertyProp.value);
-								} else if (propertyProp.type === "RestElement") {
-									queue.push(propertyProp.argument);
-								} else {
-									const excCheck: never = propertyProp;
-									throw new AssertionError();
-								}
+					if (pat.type === "Identifier") {
+						hoist(pat.name, ancestors, hoistOptions);
+					} else if (pat.type === "MemberExpression") {
+						throw new AssertionError(
+							"MemberExpression is not supposed to be on lhs of a binding declaration (I think)",
+						);
+					} else if (pat.type === "ObjectPattern") {
+						for (const propertyProp of pat.properties) {
+							if (propertyProp.type === "Property") {
+								queue.push(propertyProp.value);
+							} else if (propertyProp.type === "RestElement") {
+								queue.push(propertyProp.argument);
+							} else {
+								const excCheck: never = propertyProp;
+								throw new AssertionError();
 							}
-
-						} else if (pat.type === "ArrayPattern") {
-							for (const elmPattern of pat.elements) {
-								if (elmPattern !== null) {
-									queue.push(elmPattern);
-								}
-							}
-
-						} else if (pat.type === "RestElement") {
-							throw new AssertionError('not yet implmented');
-
-						} else if (pat.type === "AssignmentPattern") {
-							queue.push(pat.left);
-
-						} else {
-							const exhCheck: never = pat;
-							throw new AssertionError(`unsupported/invalid syntax node type in binding assignment lhs: ${pat}`);
 						}
-					} finally {
-						console.groupEnd();
+					} else if (pat.type === "ArrayPattern") {
+						for (const elmPattern of pat.elements) {
+							if (elmPattern !== null) {
+								queue.push(elmPattern);
+							}
+						}
+					} else if (pat.type === "RestElement") {
+						throw new AssertionError("not yet implmented");
+					} else if (pat.type === "AssignmentPattern") {
+						queue.push(pat.left);
+					} else {
+						const exhCheck: never = pat;
+						throw new AssertionError(
+							`unsupported/invalid syntax node type in binding assignment lhs: ${pat}`,
+						);
 					}
 				}
 			}

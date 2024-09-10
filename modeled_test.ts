@@ -326,3 +326,27 @@ Deno.test("pattern: array of objects", () => {
 	expect(rest).toBeInstanceOf(M.VMArray);
 	expect(rest.arrayElements).toHaveLength(4);
 });
+
+Deno.test("pattern: object of array", () => {
+	using _ = useNewVM();
+
+	const isSelected: M.JSValue = {type: 'boolean', value: false};
+	const x: M.JSValue = {type: 'number', value: 99.012};
+
+	const object = new M.VMObject();
+	object.setProperty("isSelected", isSelected);
+	object.setProperty("x", x);
+
+	const numbers = new M.VMArray();
+	for (let i=0; i < 5; i++) {
+		numbers.arrayElements.push({ type: 'number', value: Math.random() * 1000.0 });
+	}
+	object.setProperty("numbers", numbers);
+
+	const bset = bindingPatternJS("var {isSelected, numbers: [a, b, ...more]} = _", object);
+
+	expect(bset.size).toBe(4);
+	expect(bset.get("isSelected")).toBe(isSelected);
+	expect(bset.get("a")).toBe(numbers.arrayElements[0]);
+	expect(bset.get("b")).toBe(numbers.arrayElements[1]);
+});
